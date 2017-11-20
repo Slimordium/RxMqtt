@@ -6,18 +6,18 @@ using System.Text;
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class UnsubscribeMsg : MqttMessage
+    internal class Unsubscribe : MqttMessage
     {
         private const byte MsgUnsubscribeFlagBits = 0x02;
 
         internal string[] Topics { get; set; }
 
-        internal UnsubscribeMsg()
+        internal Unsubscribe()
         {
             MsgType = MsgType.Unsubscribe;
         }
 
-        internal UnsubscribeMsg(string[] topics)
+        internal Unsubscribe(string[] topics)
         {
             MsgType = MsgType.Unsubscribe;
             Topics = topics;

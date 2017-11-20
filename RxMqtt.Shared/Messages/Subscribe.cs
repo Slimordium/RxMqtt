@@ -1,11 +1,12 @@
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class SubscribeMsg : MqttMessage
+    internal class Subscribe : MqttMessage
     {
         private const byte MsgSubscribeFlagBits = 0x02;
 
@@ -16,15 +17,75 @@ namespace RxMqtt.Shared.Messages
             get { return Topics.Select(t => (byte) 0x01).ToArray(); }
         }
 
-        internal SubscribeMsg()
+        internal Subscribe()
         {
             MsgType = MsgType.Subscribe;
         }
 
-        internal SubscribeMsg(string[] topics)
+        internal Subscribe(string[] topics)
         {
             MsgType = MsgType.Subscribe;
             Topics = topics;
+        }
+
+        internal Subscribe(ushort packetId)
+        {
+            MsgType = MsgType.Subscribe;
+            PacketId = packetId;
+        }
+
+        protected static int decodeRemainingLength(byte[] channel)
+        {
+            var multiplier = 1;
+            var value = 0;
+
+            foreach (var b in channel)
+            {
+                var digit = 0;
+                do
+                {
+                    digit = b;
+                    value += ((digit & 127) * multiplier);
+                    multiplier *= 128;
+                }
+                while 
+                ((digit & 128) != 0);
+            }
+
+            return value;
+        }
+
+        internal Subscribe(byte[] buffer)
+        {
+            MsgType = MsgType.Subscribe;
+
+            var index = 0;
+
+            var remainingLength = decodeRemainingLength(buffer);
+            buffer = new byte[remainingLength];
+
+            PacketId = BytesToUshort(new[] {buffer[index++], buffer[index++]});
+
+            List<string> topics = new List<String>();
+            //List<byte> qosLevels = new List<byte>();
+
+            do
+            {
+                var length = BytesToUshort(new[] {buffer[index++], buffer[index++]});
+
+                var topicBuffer = new byte[length];
+
+                Array.Copy(buffer, index, topicBuffer, 0, length);
+
+                index += length;
+                topics.Add(Encoding.UTF8.GetString(topicBuffer));
+
+                //qosLevels.Add(buffer[index++]);
+
+            } while (index < remainingLength);
+
+            Topics = topics.ToArray();
+            //QoSLevels = qosLevels.ToArray();
         }
 
         internal override byte[] GetBytes()
@@ -53,7 +114,7 @@ namespace RxMqtt.Shared.Messages
                     continue;
 
                 if (Topics[topicIdx].Length < 1 || Topics[topicIdx].Length > ushort.MaxValue)
-                    throw new Exception("Topic too long!");
+                    throw new ArgumentOutOfRangeException(Topics[topicIdx]);
 
                 topicsUtf8[topicIdx] = Encoding.UTF8.GetBytes(Topics[topicIdx]);
                 payloadSize += 2; // topic size (MSB, LSB)

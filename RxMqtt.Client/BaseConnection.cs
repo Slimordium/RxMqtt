@@ -11,14 +11,14 @@ namespace RxMqtt.Client
     {
         protected static Subject<Tuple<MsgType, int>> _ackSubject;
 
-        protected static Subject<PublishMsg> _publishSubject;
+        protected static Subject<Publish> _publishSubject;
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
         private readonly object _pubSync = new object();
 
         protected string HostName;
 
-        public IObservable<PublishMsg> PublishObservable { get; set; }
+        public IObservable<Publish> PublishObservable { get; set; }
 
         public IObservable<Tuple<MsgType, int>> AckObservable { get; set; }
 
@@ -36,7 +36,7 @@ namespace RxMqtt.Client
                 _publishSubject?.Dispose();
 
                 _ackSubject = new Subject<Tuple<MsgType, int>>();
-                _publishSubject = new Subject<PublishMsg>();
+                _publishSubject = new Subject<Publish>();
 
                 AckObservable = _ackSubject.AsObservable();
                 PublishObservable = _publishSubject.AsObservable().Synchronize(_pubSync);

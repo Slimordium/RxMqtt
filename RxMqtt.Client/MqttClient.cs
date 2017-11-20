@@ -110,7 +110,7 @@ namespace RxMqtt.Client
                     tcs.SetResult(Status.Initialized);
                 });
 
-            _connection.WriteSubject.OnNext(new ConnectMsg(_connectionId, _keepAliveInSeconds));
+            _connection.WriteSubject.OnNext(new Connect(_connectionId, _keepAliveInSeconds));
 
             _keepAliveTimer = new Timer(Ping);
 
@@ -130,7 +130,7 @@ namespace RxMqtt.Client
             if (timeout == default(TimeSpan))
                 timeout = TimeSpan.FromSeconds(15);
 
-            var messageToPublish = new PublishMsg
+            var messageToPublish = new Publish
             {
                 Topic = topic,
                 Message = Encoding.UTF8.GetBytes(message)
@@ -185,13 +185,13 @@ namespace RxMqtt.Client
         #endregion
 
         #region PrivateMethods
-        private async Task<bool> PublishAndWaitForAck(PublishMsg messageToPublish, CancellationToken cancellationToken)
+        private async Task<bool> PublishAndWaitForAck(Publish messageToPublish, CancellationToken cancellationToken)
         {
-            var tcsAck = new TaskCompletionSource<PublishMsg>();
+            var tcsAck = new TaskCompletionSource<Publish>();
 
             var publishAckDisposable = _connection.AckObservable
                 .Where(s => s.Item1 == MsgType.PublishAck && s.Item2 == messageToPublish.PacketId)
-                .Subscribe(m => { tcsAck.SetResult(new PublishMsg()); });
+                .Subscribe(m => { tcsAck.SetResult(new Publish()); });
 
             cancellationToken.Register(() => { tcsAck.TrySetCanceled(); });
 
@@ -213,7 +213,7 @@ namespace RxMqtt.Client
 
         private void PublishAck(MqttMessage mqttMessage)
         {
-            _connection.WriteSubject.OnNext(new PublishAckMsg(mqttMessage.PacketId));
+            _connection.WriteSubject.OnNext(new PublishAck(mqttMessage.PacketId));
         }
 
         private void Ping(object sender)
@@ -232,14 +232,14 @@ namespace RxMqtt.Client
         {
             var tcs = new TaskCompletionSource<bool>();
 
-            SubscribeMsg subscribeMessage = null;
+            Subscribe subscribeMessage = null;
 
             lock (_subscriptions)
             {
                 if (!_subscriptions.Contains(topic))
                 {
                     _subscriptions.Add(topic);
-                    subscribeMessage = new SubscribeMsg(_subscriptions.ToArray());
+                    subscribeMessage = new Subscribe(_subscriptions.ToArray());
                 }
                 else
                 {
@@ -290,14 +290,14 @@ namespace RxMqtt.Client
         {
             var tcs = new TaskCompletionSource<bool>();
 
-            SubscribeMsg subscribeMessage;
+            Subscribe subscribeMessage;
 
             lock (_subscriptions)
             {
                 if (!_subscriptions.Any())
                     return;
 
-                subscribeMessage = new SubscribeMsg(_subscriptions.ToArray());
+                subscribeMessage = new Subscribe(_subscriptions.ToArray());
             }
 
             var streamSubscriptionDisposable = new SingleAssignmentDisposable();
@@ -321,12 +321,12 @@ namespace RxMqtt.Client
         {
             var tcs = new TaskCompletionSource<bool>();
 
-            UnsubscribeMsg unsubscribeMessage;
+            Unsubscribe unsubscribeMessage;
 
             lock (_subscriptions)
             {
                 _subscriptions.Remove(topic);
-                unsubscribeMessage = new UnsubscribeMsg(new[] {topic});
+                unsubscribeMessage = new Unsubscribe(new[] {topic});
             }
 
             using (var cts = new CancellationTokenSource())

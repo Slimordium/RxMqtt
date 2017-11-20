@@ -27,7 +27,7 @@ namespace RxMqtt.Shared
             Disposable?.Dispose();
         }
 
-        internal void PublishReceived(PublishMsg msg)
+        internal void PublishReceived(Publish msg)
         {
             try
             {

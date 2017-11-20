@@ -266,7 +266,7 @@ namespace RxMqtt.Client
 
                     switch (msgType) {
                         case MsgType.Publish:
-                            var msg = new PublishMsg(newBuffer);
+                            var msg = new Publish(newBuffer);
                             _publishSubject.OnNext(msg);
                             break;
                         case MsgType.ConnectAck:
@@ -344,7 +344,7 @@ namespace RxMqtt.Client
 
                         BeginRead(_stream);
 
-                        WriteSubject.OnNext(new ConnectMsg(_connectionId, _keepAliveInSeconds));
+                        WriteSubject.OnNext(new Connect(_connectionId, _keepAliveInSeconds));
                     }
                     else
                     {

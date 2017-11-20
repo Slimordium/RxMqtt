@@ -1,11 +1,11 @@
 using RxMqtt.Shared;
 namespace RxMqtt.Shared.Messages
 {
-    internal class PublishAckMsg : MqttMessage
+    internal class PublishAck : MqttMessage
     {
-        internal PublishAckMsg(int messageId)
+        internal PublishAck(ushort packetId)
         {
-            PacketId = (ushort)messageId;
+            PacketId = packetId;
             MsgType = MsgType.PublishAck;
         }
 

@@ -5,7 +5,7 @@ namespace RxMqtt.Shared.Messages
     {
         internal DisconnectMsg()
         {
-            MsgType = Shared.MsgType.Disconnect;
+            MsgType = MsgType.Disconnect;
         }
 
         internal override byte[] GetBytes()

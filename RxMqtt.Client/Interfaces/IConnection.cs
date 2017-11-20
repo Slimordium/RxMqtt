@@ -10,7 +10,7 @@ namespace RxMqtt.Client
     {
         Subject<MqttMessage> WriteSubject { get; }
 
-        IObservable<PublishMsg> PublishObservable { get; }
+        IObservable<Publish> PublishObservable { get; }
 
         IObservable<Tuple<MsgType, int>> AckObservable { get; }
 

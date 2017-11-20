@@ -4,15 +4,16 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}</ProjectGuid>
-    <OutputType>Library</OutputType>
-    <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>RxMqtt.Shared</RootNamespace>
-    <AssemblyName>RxMqtt.Shared</AssemblyName>
+    <ProjectGuid>{400E050C-298A-4E2B-9073-FAAAB0B47442}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>RxMqtt.Client.Console</RootNamespace>
+    <AssemblyName>RxMqtt.Client.Console</AssemblyName>
     <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
@@ -22,6 +23,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <OutputPath>bin\Release\</OutputPath>
@@ -30,9 +32,6 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="NLog, Version=4.0.0.0, Culture=neutral, PublicKeyToken=5120e14c03d0593c, processorArchitecture=MSIL">
-      <HintPath>..\packages\NLog.4.4.12\lib\net45\NLog.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -43,28 +42,21 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Enums\MsgOffset.cs" />
-    <Compile Include="Enums\MsgSize.cs" />
-    <Compile Include="Enums\MsgType.cs" />
-    <Compile Include="Enums\QosLevel.cs" />
-    <Compile Include="Enums\Status.cs" />
-    <Compile Include="IMqttClient.cs" />
-    <Compile Include="Messages\PingResponse.cs" />
-    <Compile Include="Messages\SubscribeAck.cs" />
-    <Compile Include="Messages\ConnectAck.cs" />
-    <Compile Include="Messages\Connect.cs" />
-    <Compile Include="Messages\Disconnect.cs" />
-    <Compile Include="Messages\MqttMessage.cs" />
-    <Compile Include="Messages\PingMsg.cs" />
-    <Compile Include="Messages\PublishAck.cs" />
-    <Compile Include="Messages\Publish.cs" />
-    <Compile Include="Messages\Subscribe.cs" />
-    <Compile Include="Messages\Unsubscribe.cs" />
+    <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Subscription.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RxMqtt.Client\RxMqtt.Client.csproj">
+      <Project>{a141a159-9e65-4dcb-95fd-210f0a3fdbee}</Project>
+      <Name>RxMqtt.Client</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\RxMqtt.Shared\RxMqtt.Shared.csproj">
+      <Project>{fcb5d28a-96ad-400b-8d4f-65c21fdf487f}</Project>
+      <Name>RxMqtt.Shared</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

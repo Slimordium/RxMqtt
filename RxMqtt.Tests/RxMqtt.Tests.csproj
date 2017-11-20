@@ -110,9 +110,17 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\RxMqtt.Broker\RxMqtt.Broker.csproj">
+      <Project>{67ff9f0b-bce7-4f55-a692-a92457e3ddf3}</Project>
+      <Name>RxMqtt.Broker</Name>
+    </ProjectReference>
     <ProjectReference Include="..\RxMqtt.Client\RxMqtt.Client.csproj">
       <Project>{a141a159-9e65-4dcb-95fd-210f0a3fdbee}</Project>
       <Name>RxMqtt.Client</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\RxMqtt.Shared\RxMqtt.Shared.csproj">
+      <Project>{fcb5d28a-96ad-400b-8d4f-65c21fdf487f}</Project>
+      <Name>RxMqtt.Shared</Name>
     </ProjectReference>
   </ItemGroup>
   <Choose>

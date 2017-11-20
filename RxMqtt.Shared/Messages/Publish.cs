@@ -6,7 +6,7 @@ using NLog;
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class PublishMsg : MqttMessage
+    internal class Publish : MqttMessage
     {
         private const byte DupFlagMask = 0x08;
         private const byte DupFlagOffset = 0x03;
@@ -23,19 +23,19 @@ namespace RxMqtt.Shared.Messages
 
         internal bool Retain { get; set; }
 
-        internal PublishMsg()
+        internal Publish()
         {
             MsgType = MsgType.Publish;
         }
 
-        internal PublishMsg(string topic, byte[] message)
+        internal Publish(string topic, byte[] message)
         {
             MsgType = MsgType.Publish;
             Topic = topic;
             Message = message ?? new byte[] { 0x00 };
         }
 
-        internal PublishMsg(byte[] buffer)
+        internal Publish(byte[] buffer)
         {
             var index = 5;
 

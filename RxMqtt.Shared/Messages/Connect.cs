@@ -5,7 +5,7 @@ using System.Text;
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class ConnectMsg : MqttMessage
+    internal class Connect : MqttMessage
     {
         #region Constants
 
@@ -34,14 +34,30 @@ namespace RxMqtt.Shared.Messages
 
         #endregion
 
-        public ConnectMsg(string clientId, ushort keepAlivePeriod)
+        public Connect(string clientId, ushort keepAlivePeriod)
         {
             ClientId = clientId;
             KeepAlivePeriod = keepAlivePeriod;
             MsgType = MsgType.Connect;
         }
 
-        internal override byte[] GetBytes() //Huge method, any chance to unit test?
+        public Connect(byte[] buffer)
+        {
+            var index = 11;
+            
+            KeepAlivePeriod = (ushort)((buffer[index] << 8) & 0xFF00);
+            KeepAlivePeriod |= buffer[index++];
+
+            var clientIdLength = ((buffer[index++] << 8) & 0xFF00);
+            clientIdLength |= buffer[index++];
+
+            var clientIdBuffer = new byte[clientIdLength];
+            Array.Copy(buffer, index, clientIdBuffer, 0, clientIdLength);
+
+            ClientId = Encoding.UTF8.GetString(clientIdBuffer);
+        }
+
+        internal override byte[] GetBytes()
         {
             var fixedHeaderSize = 1;
             var payloadSize = 0;
