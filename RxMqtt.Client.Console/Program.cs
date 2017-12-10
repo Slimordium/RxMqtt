@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using RxMqtt.Shared;
 
 namespace RxMqtt.Client.Console
 {
@@ -14,10 +15,17 @@ namespace RxMqtt.Client.Console
 
             client.InitializeAsync().Wait();
 
+            client.SubscribeAsync(new Subscription(Handler, "sensor_data/humidity"));
 
+            client.PublishAsync("HTU21D_humidity_outside,119.00", "sensor_data/humidity").Wait();
 
             System.Console.ReadLine();
 
+        }
+
+        private static Task Handler(object o, string s)
+        {
+            throw new NotImplementedException();
         }
     }
 }

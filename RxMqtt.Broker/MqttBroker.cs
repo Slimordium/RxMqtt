@@ -110,7 +110,9 @@ namespace RxMqtt.Broker
 
                     client.ClientId = connectMsg.ClientId;
 
+                    _clientStates.Remove(connectMsg.ClientId);
                     _clientStates.Add(connectMsg.ClientId, client);
+                    _clientSubscriptions.Remove(connectMsg.ClientId);
                     _clientSubscriptions.Add(connectMsg.ClientId, new List<string>());
 
                     BeginSend(client, new Shared.Messages.ConnectAck().GetBytes());

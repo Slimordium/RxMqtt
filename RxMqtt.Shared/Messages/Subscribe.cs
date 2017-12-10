@@ -59,33 +59,27 @@ namespace RxMqtt.Shared.Messages
         {
             MsgType = MsgType.Subscribe;
 
-            var index = 0;
+            var remainingLength = decodeRemainingLength(new [] { buffer[1], buffer[2] });
 
-            var remainingLength = decodeRemainingLength(buffer);
-            buffer = new byte[remainingLength];
+            PacketId = BytesToUshort(new[] {buffer[3], buffer[4]});
 
-            PacketId = BytesToUshort(new[] {buffer[index++], buffer[index++]});
+            var topics = new List<String>();
 
-            List<string> topics = new List<String>();
-            //List<byte> qosLevels = new List<byte>();
-
-            do
+            while(true)
             {
-                var length = BytesToUshort(new[] {buffer[index++], buffer[index++]});
+                var length = BytesToUshort(new[] { buffer[4], buffer[5] });
 
                 var topicBuffer = new byte[length];
 
-                Array.Copy(buffer, index, topicBuffer, 0, length);
-
-                index += length;
+                Array.Copy(buffer, 6, topicBuffer, 0, length);
+                
                 topics.Add(Encoding.UTF8.GetString(topicBuffer));
 
-                //qosLevels.Add(buffer[index++]);
-
-            } while (index < remainingLength);
+                if (remainingLength - 5 - length == 0)
+                    break;
+            }
 
             Topics = topics.ToArray();
-            //QoSLevels = qosLevels.ToArray();
         }
 
         internal override byte[] GetBytes()
