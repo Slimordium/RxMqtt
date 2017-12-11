@@ -75,15 +75,13 @@ namespace RxMqtt.Client.Console
 
                 System.Console.WriteLine("published");
             }
-           
-
         }
 
         private static Task Handler(object o, string s)
         {
             return Task.Run((() =>
             {
-                System.Console.WriteLine(s);
+                System.Console.WriteLine($"In => '{s}'");
             }));
         }
     }

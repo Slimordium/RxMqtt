@@ -99,6 +99,12 @@ namespace RxMqtt.Broker
 
                     foreach (var subscriptionMapping in _clientSubscriptions.Where(subscription => subscription.Value.Contains(publishMsg.Topic)).ToList())
                     {
+                        if (subscriptionMapping.Key.Equals(client.ClientId))
+                        {
+                            _logger.Log(LogLevel.Warn, "Recursive publish, ignoring");
+                            continue;
+                        }
+
                         _logger.Log(LogLevel.Trace, $"'{subscriptionMapping.Key}' is subscribed to '{publishMsg.Topic}', Publishing message");
                         BeginSend(_clientStates[subscriptionMapping.Key], new Shared.Messages.Publish(publishMsg.Topic, publishMsg.Message).GetBytes());
                     }
