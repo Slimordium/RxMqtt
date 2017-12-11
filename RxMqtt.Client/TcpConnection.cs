@@ -275,7 +275,7 @@ namespace RxMqtt.Client
                         case MsgType.PingResponse:
                             break;
                         default:
-                            _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, MqttMessage.GetPacketId(newBuffer)));
+                            _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, MqttMessage.BytesToUshort(new [] { newBuffer[1], newBuffer[2] })));
                             break;
                     }
 

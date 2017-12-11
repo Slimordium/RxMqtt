@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using LogLevel = NLog.LogLevel;
 
 namespace RxMqtt.Shared.Messages
 {
@@ -34,49 +35,44 @@ namespace RxMqtt.Shared.Messages
             PacketId = packetId;
         }
 
-        protected static int decodeRemainingLength(byte[] channel)
-        {
-            var multiplier = 1;
-            var value = 0;
-
-            foreach (var b in channel)
-            {
-                var digit = 0;
-                do
-                {
-                    digit = b;
-                    value += ((digit & 127) * multiplier);
-                    multiplier *= 128;
-                }
-                while 
-                ((digit & 128) != 0);
-            }
-
-            return value;
-        }
-
         internal Subscribe(byte[] buffer)
         {
             MsgType = MsgType.Subscribe;
 
-            var remainingLength = decodeRemainingLength(new [] { buffer[1], buffer[2] });
+            var packetLength = ToUshort(new [] { buffer[1], buffer[2] });
 
-            PacketId = BytesToUshort(new[] {buffer[3], buffer[4]});
+            PacketId = ToUshort(new[] {buffer[3], buffer[4]});
 
-            var topics = new List<String>();
+            var topics = new List<string>();
+
+            var topicLengthIndex = 5;//First topic length is at this index
+            var combinedTopicLengths = 0;
 
             while(true)
             {
-                var length = BytesToUshort(new[] { buffer[4], buffer[5] });
+                try
+                {
+                    var topicLength = ToUshort(new[] { buffer[topicLengthIndex] });
 
-                var topicBuffer = new byte[length];
+                    combinedTopicLengths += topicLength;
 
-                Array.Copy(buffer, 6, topicBuffer, 0, length);
-                
-                topics.Add(Encoding.UTF8.GetString(topicBuffer));
+                    var topicBuffer = new byte[topicLength];
 
-                if (remainingLength - 5 - length == 0)
+                    Array.Copy(buffer, topicLengthIndex + 1, topicBuffer, 0, topicLength);
+
+                    topics.Add(Encoding.UTF8.GetString(topicBuffer));
+
+                    if (packetLength - combinedTopicLengths <= topics.Count * 3 + 5)
+                        break;
+
+                    topicLengthIndex += topicLength + 3;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log(LogLevel.Error, e);
+                    Logger.Log(LogLevel.Error, $"{Encoding.UTF8.GetString(buffer)}");
                     break;
+                }
             }
 
             Topics = topics.ToArray();

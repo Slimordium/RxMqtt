@@ -80,12 +80,30 @@ namespace RxMqtt.Shared.Messages
             return returnValue;
         }
 
-        internal static ushort GetPacketId(byte[] bytes)
+        //Annoying...
+        internal static ushort ToUshort(byte[] buffer)
         {
-            return BytesToUshort(new [] {bytes[2], bytes[3]});
+            var multiplier = 1;
+            var value = 0;
+
+            foreach (var b in buffer)
+            {
+                var digit = 0;
+                do
+                {
+                    digit = b;
+                    value += ((digit & 127) * multiplier);
+                    multiplier *= 128;
+                }
+                while
+                ((digit & 128) != 0);
+            }
+
+            return (ushort)value;
         }
 
-        protected int GetRemainingLength(int remainingLength, byte[] buffer, int index)
+        //Annoying...
+        internal int GetRemainingLength(int remainingLength, byte[] buffer, int index)
         {
             do
             {

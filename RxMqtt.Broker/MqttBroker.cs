@@ -1,12 +1,11 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 
@@ -15,15 +14,49 @@ namespace RxMqtt.Broker
     public class MqttBroker
     {
         private readonly ManualResetEvent _acceptConnectionResetEvent = new ManualResetEvent(false);
+
         private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+
+        private readonly IPAddress _ipAddress = IPAddress.Any;
+
+        /// <summary>
+        /// Clients/sockets
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, ClientState> _clientStates = new ConcurrentDictionary<string, ClientState>();
+
+        /// <summary>
+        /// Subscriptions by client
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, List<string>> _clientSubscriptions = new ConcurrentDictionary<string, List<string>>();
+
+        /// <summary>
+        /// Recursivly handle read/write of all clients
+        /// </summary>
+        public MqttBroker()
+        {
+            _logger.Log(LogLevel.Warn, "Binding to all local addresses");
+        }
+
+        /// <summary>
+        /// Recursivly handle read/write to all clients
+        /// </summary>
+        public MqttBroker(string ipAddress)
+        {
+            if (!IPAddress.TryParse(ipAddress, out _ipAddress))
+                _logger.Log(LogLevel.Warn, "Could not parse IP Address, listening on all local addresses");
+        }
 
         public void StartListening(CancellationToken cancellationToken)
         {
-            var localEndPoint = new IPEndPoint(IPAddress.Any, 1883);
+            _logger.Log(LogLevel.Info, $"Broker starting on '{_ipAddress}'");
+
+            var localEndPoint = new IPEndPoint(_ipAddress, 1883);
             var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) {UseOnlyOverlappedIO = true};
 
             listener.Bind(localEndPoint);
             listener.Listen(100);
+
+            _logger.Log(LogLevel.Info, "Broker listening on 1883");
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -33,7 +66,8 @@ namespace RxMqtt.Broker
 
                     listener.BeginAccept(AcceptConnectionCallback, listener);
 
-                    _acceptConnectionResetEvent.WaitOne();
+                    //Wait 30 seconds for client connection to finish
+                    _acceptConnectionResetEvent.WaitOne(TimeSpan.FromSeconds(30));
                 }
                 catch (Exception e)
                 {
@@ -44,24 +78,19 @@ namespace RxMqtt.Broker
 
         private void AcceptConnectionCallback(IAsyncResult asyncResult)
         {
+            _logger.Log(LogLevel.Trace, $"Client connecting...");
+
             var listener = (Socket)asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
-            _logger.Log(LogLevel.Trace, $"Client connecting...");
-
-            var state = new ClientState
-            {
-                Socket = socket
-            };
+            var state = new ClientState { Socket = socket };
 
             socket.BeginReceive(state.Buffer, 0, 128000, 0, ReceiveCallback, state);
 
+            _logger.Log(LogLevel.Trace, $"Client connected");
+
             _acceptConnectionResetEvent.Set();
         }
-
-        private static readonly Dictionary<string, ClientState> _clientStates = new Dictionary<string, ClientState>();
-
-        private static readonly Dictionary<string, List<string>> _clientSubscriptions = new Dictionary<string, List<string>>();
 
         private static void ReceiveCallback(IAsyncResult asyncResult)
         {
@@ -101,7 +130,7 @@ namespace RxMqtt.Broker
                     {
                         if (subscriptionMapping.Key.Equals(client.ClientId))
                         {
-                            _logger.Log(LogLevel.Warn, "Recursive publish, ignoring");
+                            _logger.Log(LogLevel.Warn, $"'{client.ClientId}' - recursive publish, ignoring message");
                             continue;
                         }
 
@@ -116,10 +145,13 @@ namespace RxMqtt.Broker
 
                     client.ClientId = connectMsg.ClientId;
 
-                    _clientStates.Remove(connectMsg.ClientId);
-                    _clientStates.Add(connectMsg.ClientId, client);
-                    _clientSubscriptions.Remove(connectMsg.ClientId);
-                    _clientSubscriptions.Add(connectMsg.ClientId, new List<string>());
+                    //Remove old state/socket if already exists
+                    _clientStates.TryRemove(connectMsg.ClientId, out var tempClient);
+                    _clientStates.TryAdd(connectMsg.ClientId, client);
+
+                    //Remove subscriptions if already exists
+                    _clientSubscriptions.TryRemove(connectMsg.ClientId, out var tempClientSubscriptions);
+                    _clientSubscriptions.TryAdd(connectMsg.ClientId, new List<string>());
 
                     BeginSend(client, new Shared.Messages.ConnectAck().GetBytes());
                     break;
@@ -132,17 +164,19 @@ namespace RxMqtt.Broker
 
                     foreach (var topic in subscribeMsg.Topics)
                     {
-                        if (!_clientSubscriptions[client.ClientId].Contains(topic))
-                        {
-                            _logger.Log(LogLevel.Trace, $"Adding subscription to topic '{topic}' for client '{client.ClientId}'");
-                            _clientSubscriptions[client.ClientId].Add(topic);
-                        }
+                        if (_clientSubscriptions[client.ClientId].Contains(topic))
+                            continue;//Already subscribed, ignore the request
+
+                        _logger.Log(LogLevel.Trace, $"Adding subscription to topic '{topic}' for client '{client.ClientId}'");
+                        _clientSubscriptions[client.ClientId].Add(topic);
                     }
 
                     BeginSend(client, new Shared.Messages.SubscribeAck(subscribeMsg.PacketId).GetBytes());
                     break;
+                case MsgType.PublishAck:
+                    break;
                 default:
-                    _logger.Log(LogLevel.Warn, $"Unknown message: {Encoding.UTF8.GetString(newBuffer)}");
+                    _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(newBuffer)}'");
                     break;
             }
 
@@ -161,7 +195,7 @@ namespace RxMqtt.Broker
                 var socket = (Socket)ar.AsyncState;
                 var bytesSent = socket.EndSend(ar);
 
-                _logger.Log(LogLevel.Trace, $"Sent {bytesSent} bytes");
+                _logger.Log(LogLevel.Trace, $"Sent '{bytesSent}' bytes");
             }
             catch (Exception e)
             {

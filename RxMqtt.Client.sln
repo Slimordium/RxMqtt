@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Client", "RxMqtt.Cli
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Client.Console", "RxMqtt.Client.Console\RxMqtt.Client.Console.csproj", "{400E050C-298A-4E2B-9073-FAAAB0B47442}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Shared", "RxMqtt.Shared\RxMqtt.Shared.csproj", "{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,6 +38,16 @@ Global
 		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Release|Any CPU.Build.0 = Release|Any CPU
 		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Test|Any CPU.ActiveCfg = Release|Any CPU
 		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Test|Any CPU.Build.0 = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectHost|Any CPU.ActiveCfg = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectHost|Any CPU.Build.0 = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectService|Any CPU.ActiveCfg = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectService|Any CPU.Build.0 = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Test|Any CPU.ActiveCfg = Release|Any CPU
+		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Test|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

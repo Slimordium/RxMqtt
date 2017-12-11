@@ -14,24 +14,23 @@ namespace RxMqtt.Client.Console
     {
         static void Main(string[] args)
         {
-            
-            System.Console.WriteLine("ClientId: ");
+            var defaultClientId = $"client-{DateTime.Now.Hour}.{DateTime.Now.Minute}.{DateTime.Now.Millisecond}";
 
-            var line = string.Empty;
+            System.Console.WriteLine($"ClientId ({defaultClientId}): ");
 
             var clientId = System.Console.ReadLine();
 
             if (string.IsNullOrEmpty(clientId))
-                return;
+                clientId = defaultClientId;
 
-            System.Console.WriteLine("Ip address: ");
+            System.Console.WriteLine("Ip address (127.0.0.1): ");
 
             var ip = System.Console.ReadLine();
 
             if (string.IsNullOrEmpty(ip))
-                return;
+                ip = "127.0.0.1";
 
-            var client = new MqttClient(clientId, ip, 1883, 60); // "172.16.0.244"
+            var client = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 60); // "172.16.0.244"
 
             client.InitializeAsync().Wait();
 
@@ -41,7 +40,7 @@ namespace RxMqtt.Client.Console
                 System.Console.WriteLine("p => publish");
                 System.Console.WriteLine("q => quit");
 
-                line = System.Console.ReadLine();
+                var line = System.Console.ReadLine();
 
                 if (string.IsNullOrEmpty(line))
                     continue;
