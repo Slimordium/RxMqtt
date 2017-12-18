@@ -1,58 +1,31 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.27004.2009
+VisualStudioVersion = 15.0.27130.2010
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Client", "RxMqtt.Client\RxMqtt.Client.csproj", "{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RxMqtt.Shared", "RxMqtt.Shared\RxMqtt.Shared.csproj", "{62A614E5-322D-4601-9F09-61966318F9AE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Client.Console", "RxMqtt.Client.Console\RxMqtt.Client.Console.csproj", "{400E050C-298A-4E2B-9073-FAAAB0B47442}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Shared", "RxMqtt.Shared\RxMqtt.Shared.csproj", "{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RxMqtt.Client", "RxMqtt.Client\RxMqtt.Client.csproj", "{8BEBDACB-C996-408B-A191-BAAE0344F4C8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
-		KnectHost|Any CPU = KnectHost|Any CPU
-		KnectService|Any CPU = KnectService|Any CPU
 		Release|Any CPU = Release|Any CPU
-		Test|Any CPU = Test|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.KnectHost|Any CPU.ActiveCfg = KnectHost|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.KnectHost|Any CPU.Build.0 = KnectHost|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.KnectService|Any CPU.ActiveCfg = KnectService|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.KnectService|Any CPU.Build.0 = KnectService|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.Test|Any CPU.ActiveCfg = Test|Any CPU
-		{A141A159-9E65-4DCB-95FD-210F0A3FDBEE}.Test|Any CPU.Build.0 = Test|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.KnectHost|Any CPU.ActiveCfg = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.KnectHost|Any CPU.Build.0 = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.KnectService|Any CPU.ActiveCfg = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.KnectService|Any CPU.Build.0 = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Release|Any CPU.Build.0 = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Test|Any CPU.ActiveCfg = Release|Any CPU
-		{400E050C-298A-4E2B-9073-FAAAB0B47442}.Test|Any CPU.Build.0 = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectHost|Any CPU.ActiveCfg = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectHost|Any CPU.Build.0 = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectService|Any CPU.ActiveCfg = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.KnectService|Any CPU.Build.0 = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Test|Any CPU.ActiveCfg = Release|Any CPU
-		{FCB5D28A-96AD-400B-8D4F-65C21FDF487F}.Test|Any CPU.Build.0 = Release|Any CPU
+		{62A614E5-322D-4601-9F09-61966318F9AE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{62A614E5-322D-4601-9F09-61966318F9AE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{62A614E5-322D-4601-9F09-61966318F9AE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{62A614E5-322D-4601-9F09-61966318F9AE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8BEBDACB-C996-408B-A191-BAAE0344F4C8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8BEBDACB-C996-408B-A191-BAAE0344F4C8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8BEBDACB-C996-408B-A191-BAAE0344F4C8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8BEBDACB-C996-408B-A191-BAAE0344F4C8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {41BD009B-2BBD-4AE3-8A49-77EDE29806A5}
+		SolutionGuid = {49CB625F-D4BB-414F-9AE2-97D0557A475B}
 	EndGlobalSection
 EndGlobal

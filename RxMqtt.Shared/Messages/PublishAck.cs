@@ -1,4 +1,8 @@
 using RxMqtt.Shared;
+using System.Runtime.CompilerServices;
+[assembly: InternalsVisibleTo("RxMqtt.Broker")]
+[assembly: InternalsVisibleTo("RxMqtt.Client")]
+
 namespace RxMqtt.Shared.Messages
 {
     internal class PublishAck : MqttMessage

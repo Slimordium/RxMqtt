@@ -27,7 +27,7 @@ namespace RxMqtt.Broker
         /// <summary>
         /// Subscriptions by client
         /// </summary>
-        private static readonly ConcurrentDictionary<string, List<string>> _clientSubscriptions = new ConcurrentDictionary<string, List<string>>();
+        private static readonly Dictionary<string, List<string>> _clientSubscriptions = new Dictionary<string, List<string>>();
 
         /// <summary>
         /// Recursivly handle read/write of all clients
@@ -92,103 +92,116 @@ namespace RxMqtt.Broker
             _acceptConnectionResetEvent.Set();
         }
 
-        private static void ReceiveCallback(IAsyncResult asyncResult)
+        private static readonly object _theLock = new object();
+
+        static SemaphoreSlim _semaphoreSlim = new SemaphoreSlim(1);
+
+        private void ReceiveCallback(IAsyncResult asyncResult)
         {
-            var client = (ClientState)asyncResult.AsyncState;
-            var socket = client.Socket;
-            var bytesIn = 0;
+            _semaphoreSlim.Wait();
 
             try
             {
-                bytesIn = socket.EndReceive(asyncResult);
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, e);
-                return;
-            }
+                var client = (ClientState)asyncResult.AsyncState;
+                var socket = client.Socket;
+                var bytesIn = 0;
 
-            if (bytesIn <= 0)
-                return;
+                try
+                {
+                    bytesIn = socket.EndReceive(asyncResult);
+                }
+                catch (Exception e)
+                {
+                    _logger.Log(LogLevel.Error, e);
+                    return;
+                }
 
-            var newBuffer = new byte[bytesIn];
+                if (bytesIn <= 0)
+                    return;
 
-            Array.Copy(client.Buffer, 0, newBuffer, 0, bytesIn);
+                var newBuffer = new byte[bytesIn];
 
-            client.Buffer = new byte[128000]; 
+                Array.Copy(client.Buffer, 0, newBuffer, 0, bytesIn);
 
-            var msgType = (MsgType)(byte)((newBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+                client.Buffer = new byte[128000];
 
-            _logger.Log(LogLevel.Trace, $"In <= {msgType}");
+                var msgType = (MsgType)(byte)((newBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
-            switch (msgType)
-            {
-                case MsgType.Publish:
-                    var publishMsg = new Shared.Messages.Publish(newBuffer);
+                _logger.Log(LogLevel.Trace, $"In <= {msgType}");
 
-                    foreach (var subscriptionMapping in _clientSubscriptions.Where(subscription => subscription.Value.Contains(publishMsg.Topic)).ToList())
-                    {
-                        if (subscriptionMapping.Key.Equals(client.ClientId))
+                switch (msgType)
+                {
+                    case MsgType.Publish:
+                        var publishMsg = new Shared.Messages.Publish(newBuffer);
+
+                        foreach (var subscriptionMapping in _clientSubscriptions.Where(subscription => subscription.Value.Contains(publishMsg.Topic)).ToList())
                         {
-                            _logger.Log(LogLevel.Warn, $"'{client.ClientId}' - recursive publish, ignoring message");
-                            continue;
+                            if (subscriptionMapping.Key.Equals(client.ClientId))
+                            {
+                                _logger.Log(LogLevel.Warn, $"'{client.ClientId}' - recursive publish, ignoring message");
+                                continue;
+                            }
+
+                            _logger.Log(LogLevel.Trace, $"'{subscriptionMapping.Key}' is subscribed to '{publishMsg.Topic}', Publishing message");
+                            BeginSend(_clientStates[subscriptionMapping.Key], new Shared.Messages.Publish(publishMsg.Topic, publishMsg.Message).GetBytes());
+                        }
+                        break;
+                    case MsgType.Connect:
+                        var connectMsg = new Shared.Messages.Connect(newBuffer);
+
+                        _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected. Sending ConnectAck");
+
+                        client.ClientId = connectMsg.ClientId;
+
+                        //Remove old state/socket if already exists
+                        _clientStates.TryRemove(connectMsg.ClientId, out var tempClient);
+                        _clientStates.TryAdd(connectMsg.ClientId, client);
+
+                        //Remove subscriptions if already exists
+                        _clientSubscriptions.Remove(connectMsg.ClientId);
+                        _clientSubscriptions.Add(connectMsg.ClientId, new List<string>());
+
+                        BeginSend(client, new Shared.Messages.ConnectAck().GetBytes());
+                        break;
+                    case MsgType.PingRequest:
+                        _logger.Log(LogLevel.Trace, $"Sending ping response '{client.ClientId}'");
+                        BeginSend(client, new Shared.Messages.PingResponse().GetBytes());
+                        break;
+                    case MsgType.Subscribe:
+                        var subscribeMsg = new Shared.Messages.Subscribe(newBuffer);
+
+                        foreach (var topic in subscribeMsg.Topics)
+                        {
+                            if (_clientSubscriptions[client.ClientId].Contains(topic))
+                                continue;//Already subscribed, ignore the request
+
+                            _logger.Log(LogLevel.Trace, $"Adding subscription to topic '{topic}' for client '{client.ClientId}'");
+                            _clientSubscriptions[client.ClientId].Add(topic);
                         }
 
-                        _logger.Log(LogLevel.Trace, $"'{subscriptionMapping.Key}' is subscribed to '{publishMsg.Topic}', Publishing message");
-                        BeginSend(_clientStates[subscriptionMapping.Key], new Shared.Messages.Publish(publishMsg.Topic, publishMsg.Message).GetBytes());
-                    }
-                    break;
-                case MsgType.Connect:
-                    var connectMsg = new Shared.Messages.Connect(newBuffer);
+                        BeginSend(client, new Shared.Messages.SubscribeAck(subscribeMsg.PacketId).GetBytes());
+                        break;
+                    case MsgType.PublishAck:
+                        break;
+                    default:
+                        _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(newBuffer)}'");
+                        break;
+                }
 
-                    _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected. Sending ConnectAck");
-
-                    client.ClientId = connectMsg.ClientId;
-
-                    //Remove old state/socket if already exists
-                    _clientStates.TryRemove(connectMsg.ClientId, out var tempClient);
-                    _clientStates.TryAdd(connectMsg.ClientId, client);
-
-                    //Remove subscriptions if already exists
-                    _clientSubscriptions.TryRemove(connectMsg.ClientId, out var tempClientSubscriptions);
-                    _clientSubscriptions.TryAdd(connectMsg.ClientId, new List<string>());
-
-                    BeginSend(client, new Shared.Messages.ConnectAck().GetBytes());
-                    break;
-                case MsgType.PingRequest:
-                    _logger.Log(LogLevel.Trace, $"Sending ping response '{client.ClientId}'");
-                    BeginSend(client, new Shared.Messages.PingResponse().GetBytes());
-                    break;
-                case MsgType.Subscribe:
-                    var subscribeMsg = new Shared.Messages.Subscribe(newBuffer);
-
-                    foreach (var topic in subscribeMsg.Topics)
-                    {
-                        if (_clientSubscriptions[client.ClientId].Contains(topic))
-                            continue;//Already subscribed, ignore the request
-
-                        _logger.Log(LogLevel.Trace, $"Adding subscription to topic '{topic}' for client '{client.ClientId}'");
-                        _clientSubscriptions[client.ClientId].Add(topic);
-                    }
-
-                    BeginSend(client, new Shared.Messages.SubscribeAck(subscribeMsg.PacketId).GetBytes());
-                    break;
-                case MsgType.PublishAck:
-                    break;
-                default:
-                    _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(newBuffer)}'");
-                    break;
+                socket.BeginReceive(client.Buffer, 0, 128000, 0, ReceiveCallback, client);
             }
-
-            socket.BeginReceive(client.Buffer, 0, 128000, 0, ReceiveCallback, client);
+            finally 
+            {
+                _semaphoreSlim.Release();
+            }
         }
 
-        private static void BeginSend(ClientState clientState, byte[] buffer)
+        private void BeginSend(ClientState clientState, byte[] buffer)
         {
             clientState.Socket.BeginSend(buffer, 0, buffer.Length, 0, SendCallback, clientState.Socket);
         }
 
-        private static void SendCallback(IAsyncResult ar)
+        private void SendCallback(IAsyncResult ar)
         {
             try
             {

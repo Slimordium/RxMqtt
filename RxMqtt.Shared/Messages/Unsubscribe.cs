@@ -3,6 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Runtime.CompilerServices;
+[assembly: InternalsVisibleTo("RxMqtt.Broker")]
+[assembly: InternalsVisibleTo("RxMqtt.Client")]
 
 namespace RxMqtt.Shared.Messages
 {

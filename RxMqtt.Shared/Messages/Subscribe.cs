@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using LogLevel = NLog.LogLevel;
+using System.Runtime.CompilerServices;
+[assembly: InternalsVisibleTo("RxMqtt.Broker")]
+[assembly: InternalsVisibleTo("RxMqtt.Client")]
 
 namespace RxMqtt.Shared.Messages
 {
