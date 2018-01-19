@@ -13,7 +13,7 @@ namespace RxMqtt.Broker
         internal string ClientId { get; set; }
         internal byte[] Buffer { get; set; } = new byte[128000];
         internal Socket Socket { get; set; }
-        private static ILogger _logger = LogManager.GetCurrentClassLogger();
+        private ILogger _logger = LogManager.GetCurrentClassLogger();
 
         internal void IncomingMessage(Publish mqttMessage)
         {
