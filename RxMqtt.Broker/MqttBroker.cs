@@ -82,6 +82,7 @@ namespace RxMqtt.Broker
                 catch (Exception e)
                 {
                     _logger.Log(LogLevel.Error, e);
+                    throw;
                 }
             }
         }
