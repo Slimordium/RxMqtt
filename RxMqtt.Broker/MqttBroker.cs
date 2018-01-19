@@ -1,15 +1,11 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Reactive.Linq;
 using System.Reactive.Subjects;
-using System.Text;
 using System.Threading;
 using NLog;
-using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
@@ -18,13 +14,11 @@ namespace RxMqtt.Broker
     {
         private readonly AutoResetEvent _acceptConnectionResetEvent = new AutoResetEvent(false);
 
-        private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+        private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
         private readonly IPAddress _ipAddress = IPAddress.Any;
 
-        internal static IObservable<Publish> ObservableMqttMsgs => MqttMessagesSubject.AsObservable();
-
-        internal static Subject<Publish> MqttMessagesSubject { get; } = new Subject<Publish>(); 
+        private readonly Subject<Publish> _publishSubject = new Subject<Publish>(); 
 
         /// <summary>
         /// Clients/sockets
@@ -33,7 +27,7 @@ namespace RxMqtt.Broker
 
         public MqttBroker()
         {
-            _logger.Log(LogLevel.Warn, "Binding to all local addresses");
+            _logger.Log(LogLevel.Info, "Binding to all local addresses");
         }
 
         /// <summary>
@@ -47,15 +41,15 @@ namespace RxMqtt.Broker
 
         public void StartListening(CancellationToken cancellationToken)
         {
-            _logger.Log(LogLevel.Info, $"Broker starting on '{_ipAddress}'");
+            _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}'");
 
             var localEndPoint = new IPEndPoint(_ipAddress, 1883);
             var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) {UseOnlyOverlappedIO = true};
 
             listener.Bind(localEndPoint);
-            listener.Listen(100);
+            listener.Listen(5);
 
-            _logger.Log(LogLevel.Info, "Broker listening on 1883");
+            _logger.Log(LogLevel.Info, "Broker listening on TCP port '1883'");
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -71,8 +65,7 @@ namespace RxMqtt.Broker
                 }
             }
         }
-        
-        //TODO: Dispose clients whent they disconnect
+
         private void AcceptConnectionCallback(IAsyncResult asyncResult)
         {
             _acceptConnectionResetEvent.Set();
@@ -82,13 +75,18 @@ namespace RxMqtt.Broker
             var listener = (Socket)asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
-            var client = new Client { Socket = socket };
-
-            client.Start();
-
-            _clients.Add(client);
+            _clients.Add(new Client(socket, _publishSubject));
 
             _logger.Log(LogLevel.Trace, $"Client connected");
+        }
+
+        internal static void Disconnect(string clientId)
+        {
+            var client = _clients.FirstOrDefault(c => c.ClientId.Equals(clientId));
+
+            client.CancellationTokenSource.Cancel();
+
+            _clients.Remove(client);
         }
     }
 }

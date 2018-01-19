@@ -1,7 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -10,109 +14,143 @@ namespace RxMqtt.Broker
 {
     internal class Client
     {
-        internal string ClientId { get; set; }
-        internal byte[] Buffer { get; set; } = new byte[128000];
-        internal Socket Socket { get; set; }
+        internal string ClientId { get; private set; }
+
+        private readonly Socket _socket;
+
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        internal void IncomingMessage(Publish mqttMessage)
+        private readonly Task _clientReceiveTask;
+
+        internal CancellationTokenSource CancellationTokenSource { get; } = new CancellationTokenSource();
+
+        private readonly IObservable<byte[]> _clientReceiveObservable;
+        private readonly Subject<byte[]> _clientReceiveSubject = new Subject<byte[]>();
+
+        private readonly IObservable<Publish> _brokerPublishObservable;
+        private readonly Subject<Publish> _brokerPublishSubject;
+
+        private readonly List<string> _subscriptions = new List<string>();
+
+        internal Client(Socket socket, Subject<Publish> brokerPublishSubject)
         {
-            BeginSend( mqttMessage.GetBytes());
+            _socket = socket;
+
+            _brokerPublishObservable = brokerPublishSubject.AsObservable();
+            _brokerPublishSubject = brokerPublishSubject;
+
+            _clientReceiveObservable = _clientReceiveSubject.AsObservable();
+            _clientReceiveObservable.Subscribe(Receive);
+
+            this.CancellationTokenSource.Token.Register(() =>
+            {
+                _socket.Dispose();
+            });
+
+            _clientReceiveTask = new Task( () =>
+            {
+                while (!CancellationTokenSource.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var buffer = new byte[128000];
+
+                        var bytesIn = _socket.Receive(buffer, SocketFlags.None);
+
+                        if (bytesIn == 0)
+                            continue;
+
+                        var newBuffer = new byte[bytesIn];
+
+                        Array.Copy(buffer, 0, newBuffer, 0, bytesIn);
+
+                        _clientReceiveSubject.OnNext(newBuffer);
+                    }
+                    catch (Exception e)
+                    {
+                        _logger.Log(LogLevel.Debug, e.Message);
+                        MqttBroker.Disconnect(ClientId);
+                        break;
+                    }
+                }
+            }, CancellationTokenSource.Token, TaskCreationOptions.LongRunning);
+
+            _clientReceiveTask.Start();
         }
 
-        internal void Start()
+        internal void SubscriptionHandler(Publish mqttMessage)
         {
-            Socket.BeginReceive(Buffer, 0, 128000, 0, ReceiveCallback, null);
+            //This sends the message to this client
+            Send(mqttMessage);
         }
 
-        private void ReceiveCallback(IAsyncResult asyncResult)
+        internal void Receive(byte[] buffer)
         {
-            //var socket = (Socket)asyncResult.AsyncState;
-            var bytesIn = 0;
-
-            try
-            {
-                bytesIn = Socket.EndReceive(asyncResult);
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, e);
-                return;
-            }
-
-            if (bytesIn <= 0)
-                return;
-
-            var newBuffer = new byte[bytesIn];
-
-            Array.Copy(Buffer, 0, newBuffer, 0, bytesIn);
-
-            Buffer = new byte[128000];
-
-            var msgType = (MsgType)(byte)((newBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
             _logger.Log(LogLevel.Trace, $"In <= {msgType}");
 
             switch (msgType)
             {
                 case MsgType.Publish:
-                    var publishMsg = new Publish(newBuffer);
+                    var publishMsg = new Publish(buffer);
 
-                    BeginSend(new PublishAck(publishMsg.PacketId).GetBytes());
+                    Send(new PublishAck(publishMsg.PacketId));
 
-                    MqttBroker.MqttMessagesSubject.OnNext(publishMsg);
+                    _brokerPublishSubject.OnNext(publishMsg);
                     break;
                 case MsgType.Connect:
-                    var connectMsg = new Connect(newBuffer);
+                    var connectMsg = new Connect(buffer);
 
-                    _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected. Sending ConnectAck");
+                    _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
                     ClientId = connectMsg.ClientId;
 
                     _logger = LogManager.GetLogger(ClientId);
 
-                    BeginSend(new ConnectAck().GetBytes());
-                        
+                    Send(new ConnectAck());
                     break;
                 case MsgType.PingRequest:
-                    _logger.Log(LogLevel.Trace, $"Sending ping response '{ClientId}'");
-                    BeginSend(new PingResponse().GetBytes());
+                    Send(new PingResponse());
                     break;
                 case MsgType.Subscribe:
-                    var subscribeMsg = new Subscribe(newBuffer);
+                    var subscribeMsg = new Subscribe(buffer);
+
+                    Send(new SubscribeAck(subscribeMsg.PacketId));
 
                     foreach (var topic in subscribeMsg.Topics)
                     {
-                        MqttBroker.ObservableMqttMsgs.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic, StringComparison.InvariantCultureIgnoreCase)).Subscribe(IncomingMessage);
-                    }
+                        if (_subscriptions.Contains(topic))
+                            continue;
 
-                    BeginSend(new SubscribeAck(subscribeMsg.PacketId).GetBytes());
+                        _subscriptions.Add(topic);
+                        _brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(SubscriptionHandler);
+
+                        _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
+                    }
                     break;
                 case MsgType.PublishAck:
+
+                    break;
+                case MsgType.Disconnect:
+
                     break;
                 default:
-                    _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(newBuffer)}'");
+                    _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(buffer)}'");
                     break;
             }
-
-            Socket.BeginReceive(Buffer, 0, 128000, 0, ReceiveCallback, Socket);
         }
 
-        private void BeginSend(byte[] buffer)
+        private void Send(MqttMessage message)
         {
-            if (!Socket.Connected)
-                return;
+            _logger.Log(LogLevel.Info, $"Out => {message.MsgType} '");
 
-            Socket.BeginSend(buffer, 0, buffer.Length, 0, SendCallback, null);
-        }
-
-        private void SendCallback(IAsyncResult ar)
-        {
             try
             {
-                var bytesSent = Socket.EndSend(ar);
+                if (!_socket.Connected)
+                    return;
 
-                _logger.Log(LogLevel.Trace, $"Sent '{bytesSent}' bytes");
+                _socket.Send(message.GetBytes());
             }
             catch (Exception e)
             {
