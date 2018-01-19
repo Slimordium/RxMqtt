@@ -5,6 +5,7 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -15,7 +16,7 @@ namespace RxMqtt.Broker
     {
         internal string ClientId { get; private set; }
 
-        private readonly Socket _socket;
+        internal Socket Socket { get; }
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
@@ -24,43 +25,43 @@ namespace RxMqtt.Broker
         private readonly IObservable<byte[]> _clientReceiveObservable;
         private readonly IObservable<Publish> _brokerPublishObservable;
 
-        private readonly Subject<Publish> _brokerPublishSubject;
-
         private readonly List<string> _subscriptions = new List<string>();
+        private readonly Subject<Publish> _brokerPublishSubject;
 
         internal Client(Socket socket, Subject<Publish> brokerPublishSubject)
         {
-            _socket = socket;
+            Socket = socket;
 
-            _brokerPublishObservable = brokerPublishSubject.AsObservable();
             _brokerPublishSubject = brokerPublishSubject;
+            _brokerPublishObservable = _brokerPublishSubject.AsObservable();
 
-            CancellationTokenSource.Token.Register(() =>
-            {
-                _socket.Dispose();
-            });
-
-            _clientReceiveObservable = Read().ToObservable();
-            _clientReceiveObservable.Subscribe(OnNextPacket);
+            _clientReceiveObservable = ReadSocket().ToObservable();
         }
 
-        private IEnumerable<byte[]> Read()
+        internal bool Start()
+        {
+            _clientReceiveObservable.Subscribe(OnNextIncomingPacket); //Blocks
+
+            return true;
+        }
+
+        private IEnumerable<byte[]> ReadSocket()
         {
             while (!CancellationTokenSource.IsCancellationRequested)
             {
-                var newBuffer = new byte[1];
+                byte[] packet = null;
                 var buffer = new byte[128000];
 
                 try
                 {
-                    var bytesIn = _socket.Receive(buffer, SocketFlags.None);
+                    var bytesIn = Socket.Receive(buffer, SocketFlags.None);
 
                     if (bytesIn == 0)
                         continue;
 
-                    newBuffer = new byte[bytesIn];
+                    packet = new byte[bytesIn];
 
-                    Array.Copy(buffer, 0, newBuffer, 0, bytesIn);
+                    Array.Copy(buffer, 0, packet, 0, bytesIn);
                 }
                 catch (Exception e)
                 {
@@ -68,10 +69,23 @@ namespace RxMqtt.Broker
                     break;
                 }
 
-                yield return newBuffer;
+                yield return packet;
             }
+        }
 
-            MqttBroker.Disconnect(ClientId);
+        internal void Dispose()
+        {
+            try
+            {
+                Socket.Dispose();
+                CancellationTokenSource.Cancel();
+            }
+            catch (Exception)
+            {
+                //
+
+
+            }
         }
 
         internal void OnNextPublish(Publish mqttMessage)
@@ -80,9 +94,9 @@ namespace RxMqtt.Broker
             Send(mqttMessage);
         }
 
-        internal void OnNextPacket(byte[] buffer)
+        internal void OnNextIncomingPacket(byte[] buffer)
         {
-            if (buffer.Length <= 2)
+            if (buffer.Length <= 1)
                 return;
 
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
@@ -123,7 +137,7 @@ namespace RxMqtt.Broker
 
                     break;
                 case MsgType.Disconnect:
-                    MqttBroker.Disconnect(ClientId);
+
                     break;
                 default:
                     _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(buffer)}'");
@@ -160,10 +174,10 @@ namespace RxMqtt.Broker
 
             try
             {
-                if (!_socket.Connected)
+                if (!Socket.Connected)
                     return;
 
-                _socket.Send(message.GetBytes());
+                Socket.Send(message.GetBytes());
             }
             catch (Exception e)
             {

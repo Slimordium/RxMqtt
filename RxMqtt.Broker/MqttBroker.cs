@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reactive.Subjects;
 using System.Threading;
+using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared.Messages;
 
@@ -23,7 +24,7 @@ namespace RxMqtt.Broker
         /// <summary>
         /// Clients/sockets
         /// </summary>
-        private static readonly List<Client> _clients = new List<Client>();
+        private static readonly List<Task> _clients = new List<Task>();
 
         public MqttBroker()
         {
@@ -75,18 +76,17 @@ namespace RxMqtt.Broker
             var listener = (Socket)asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
-            _clients.Add(new Client(socket, _publishSubject));
+            socket.UseOnlyOverlappedIO = true;
 
-            _logger.Log(LogLevel.Trace, $"Client connected");
-        }
+            _clients.Add(Task.Factory.StartNew(() =>
+                                {
+                                    var client = new Client(socket, _publishSubject);
+                                    var completed = client.Start();
+                                    _logger.Log(LogLevel.Trace, "Client task completed");
+                                }
+                                , TaskCreationOptions.LongRunning));
 
-        internal static void Disconnect(string clientId)
-        {
-            var client = _clients.FirstOrDefault(c => c.ClientId.Equals(clientId));
-
-            client.CancellationTokenSource.Cancel();
-
-            _clients.Remove(client);
+            _logger.Log(LogLevel.Trace, $"Client task created");
         }
     }
 }
