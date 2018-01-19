@@ -5,7 +5,6 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -14,13 +13,13 @@ namespace RxMqtt.Broker
 {
     internal class Client
     {
-        internal string ClientId { get; private set; }
+        private string _clientId;
 
-        internal Socket Socket { get; }
+        private readonly Socket _socket;
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        internal CancellationTokenSource CancellationTokenSource { get; } = new CancellationTokenSource();
+        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 
         private readonly IObservable<byte[]> _clientReceiveObservable;
         private readonly IObservable<Publish> _brokerPublishObservable;
@@ -30,7 +29,7 @@ namespace RxMqtt.Broker
 
         internal Client(Socket socket, Subject<Publish> brokerPublishSubject)
         {
-            Socket = socket;
+            _socket = socket;
 
             _brokerPublishSubject = brokerPublishSubject;
             _brokerPublishObservable = _brokerPublishSubject.AsObservable();
@@ -47,14 +46,14 @@ namespace RxMqtt.Broker
 
         private IEnumerable<byte[]> ReadSocket()
         {
-            while (!CancellationTokenSource.IsCancellationRequested)
+            while (!_cancellationTokenSource.IsCancellationRequested)
             {
                 byte[] packet = null;
                 var buffer = new byte[128000];
 
                 try
                 {
-                    var bytesIn = Socket.Receive(buffer, SocketFlags.None);
+                    var bytesIn = _socket.Receive(buffer, SocketFlags.None);
 
                     if (bytesIn == 0)
                         continue;
@@ -77,8 +76,8 @@ namespace RxMqtt.Broker
         {
             try
             {
-                Socket.Dispose();
-                CancellationTokenSource.Cancel();
+                _socket.Dispose();
+                _cancellationTokenSource.Cancel();
             }
             catch (Exception)
             {
@@ -88,13 +87,13 @@ namespace RxMqtt.Broker
             }
         }
 
-        internal void OnNextPublish(Publish mqttMessage)
+        private void OnNextPublish(Publish mqttMessage)
         {
             //This sends the message to the client attached to this socket
             Send(mqttMessage);
         }
 
-        internal void OnNextIncomingPacket(byte[] buffer)
+        private void OnNextIncomingPacket(byte[] buffer)
         {
             if (buffer.Length <= 1)
                 return;
@@ -117,9 +116,9 @@ namespace RxMqtt.Broker
 
                     _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
-                    ClientId = connectMsg.ClientId;
+                    _clientId = connectMsg.ClientId;
 
-                    _logger = LogManager.GetLogger(ClientId);
+                    _logger = LogManager.GetLogger(_clientId);
 
                     Send(new ConnectAck());
                     break;
@@ -174,10 +173,10 @@ namespace RxMqtt.Broker
 
             try
             {
-                if (!Socket.Connected)
+                if (!_socket.Connected)
                     return;
 
-                Socket.Send(message.GetBytes());
+                _socket.Send(message.GetBytes());
             }
             catch (Exception e)
             {

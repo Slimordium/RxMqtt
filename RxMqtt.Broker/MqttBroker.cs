@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reactive.Subjects;
@@ -19,16 +18,22 @@ namespace RxMqtt.Broker
 
         private readonly IPAddress _ipAddress = IPAddress.Any;
 
-        private readonly Subject<Publish> _publishSubject = new Subject<Publish>(); 
+        private readonly Subject<Publish> _publishSubject = new Subject<Publish>();
+
+        private readonly int _port = 1883;
+
+        private IPEndPoint _ipEndPoint;
+
+        private volatile bool _started;
 
         /// <summary>
         /// Clients/sockets
         /// </summary>
-        private static readonly List<Task> _clients = new List<Task>();
+        private readonly List<Task> _clients = new List<Task>();
 
         public MqttBroker()
         {
-            _logger.Log(LogLevel.Info, "Binding to all local addresses");
+            _logger.Log(LogLevel.Info, "Binding to all local addresses, port 1883");
         }
 
         /// <summary>
@@ -37,20 +42,34 @@ namespace RxMqtt.Broker
         public MqttBroker(string ipAddress)
         {
             if (!IPAddress.TryParse(ipAddress, out _ipAddress))
-                _logger.Log(LogLevel.Warn, "Could not parse IP Address, listening on all local addresses");
+                _logger.Log(LogLevel.Warn, "Could not parse IP Address, listening on all local addresses, port 1883");
+        }
+
+        public MqttBroker(string ipAddress, int port)
+        {
+            if (!IPAddress.TryParse(ipAddress, out _ipAddress))
+                _logger.Log(LogLevel.Warn, $"Could not parse IP Address, listening on all local addresses, port {port}");
+
+            _port = port;
         }
 
         public void StartListening(CancellationToken cancellationToken)
         {
-            _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}'");
+            if (_started)
+            {
+                _logger.Log(LogLevel.Warn, $"Already running");
+                return;
+            }
 
-            var localEndPoint = new IPEndPoint(_ipAddress, 1883);
-            var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) {UseOnlyOverlappedIO = true};
+            _started = true;
 
-            listener.Bind(localEndPoint);
+            _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}:{_port}'");
+
+            _ipEndPoint = new IPEndPoint(_ipAddress, _port);
+            var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { UseOnlyOverlappedIO = true };
+
+            listener.Bind(_ipEndPoint);
             listener.Listen(5);
-
-            _logger.Log(LogLevel.Info, "Broker listening on TCP port '1883'");
 
             while (!cancellationToken.IsCancellationRequested)
             {
