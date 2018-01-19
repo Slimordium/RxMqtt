@@ -5,7 +5,6 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -20,14 +19,11 @@ namespace RxMqtt.Broker
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly Task _clientReceiveTask;
-
         internal CancellationTokenSource CancellationTokenSource { get; } = new CancellationTokenSource();
 
         private readonly IObservable<byte[]> _clientReceiveObservable;
-        private readonly Subject<byte[]> _clientReceiveSubject = new Subject<byte[]>();
-
         private readonly IObservable<Publish> _brokerPublishObservable;
+
         private readonly Subject<Publish> _brokerPublishSubject;
 
         private readonly List<string> _subscriptions = new List<string>();
@@ -39,43 +35,43 @@ namespace RxMqtt.Broker
             _brokerPublishObservable = brokerPublishSubject.AsObservable();
             _brokerPublishSubject = brokerPublishSubject;
 
-            _clientReceiveObservable = _clientReceiveSubject.AsObservable();
-            _clientReceiveObservable.Subscribe(OnNextPacket);
-
             CancellationTokenSource.Token.Register(() =>
             {
                 _socket.Dispose();
             });
 
-            _clientReceiveTask = new Task( () =>
+            _clientReceiveObservable = Read().ToObservable();
+            _clientReceiveObservable.Subscribe(OnNextPacket);
+        }
+
+        private IEnumerable<byte[]> Read()
+        {
+            while (!CancellationTokenSource.IsCancellationRequested)
             {
-                while (!CancellationTokenSource.IsCancellationRequested)
+                var newBuffer = new byte[1];
+                var buffer = new byte[128000];
+
+                try
                 {
-                    try
-                    {
-                        var buffer = new byte[128000];
+                    var bytesIn = _socket.Receive(buffer, SocketFlags.None);
 
-                        var bytesIn = _socket.Receive(buffer, SocketFlags.None);
+                    if (bytesIn == 0)
+                        continue;
 
-                        if (bytesIn == 0)
-                            continue;
+                    newBuffer = new byte[bytesIn];
 
-                        var newBuffer = new byte[bytesIn];
-
-                        Array.Copy(buffer, 0, newBuffer, 0, bytesIn);
-
-                        _clientReceiveSubject.OnNext(newBuffer);
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.Log(LogLevel.Debug, e.Message);
-                        MqttBroker.Disconnect(ClientId);
-                        break;
-                    }
+                    Array.Copy(buffer, 0, newBuffer, 0, bytesIn);
                 }
-            }, CancellationTokenSource.Token, TaskCreationOptions.LongRunning);
+                catch (Exception e)
+                {
+                    _logger.Log(LogLevel.Warn, e.Message);
+                    break;
+                }
 
-            _clientReceiveTask.Start();
+                yield return newBuffer;
+            }
+
+            MqttBroker.Disconnect(ClientId);
         }
 
         internal void OnNextPublish(Publish mqttMessage)
@@ -86,6 +82,9 @@ namespace RxMqtt.Broker
 
         internal void OnNextPacket(byte[] buffer)
         {
+            if (buffer.Length <= 2)
+                return;
+
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
             _logger.Log(LogLevel.Trace, $"In <= {msgType}");
