@@ -40,9 +40,9 @@ namespace RxMqtt.Broker
             _brokerPublishSubject = brokerPublishSubject;
 
             _clientReceiveObservable = _clientReceiveSubject.AsObservable();
-            _clientReceiveObservable.Subscribe(Receive);
+            _clientReceiveObservable.Subscribe(OnNextPacket);
 
-            this.CancellationTokenSource.Token.Register(() =>
+            CancellationTokenSource.Token.Register(() =>
             {
                 _socket.Dispose();
             });
@@ -78,13 +78,13 @@ namespace RxMqtt.Broker
             _clientReceiveTask.Start();
         }
 
-        internal void SubscriptionHandler(Publish mqttMessage)
+        internal void OnNextPublish(Publish mqttMessage)
         {
-            //This sends the message to this client
+            //This sends the message to the client attached to this socket
             Send(mqttMessage);
         }
 
-        internal void Receive(byte[] buffer)
+        internal void OnNextPacket(byte[] buffer)
         {
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
@@ -97,7 +97,7 @@ namespace RxMqtt.Broker
 
                     Send(new PublishAck(publishMsg.PacketId));
 
-                    _brokerPublishSubject.OnNext(publishMsg);
+                    _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
                     break;
                 case MsgType.Connect:
                     var connectMsg = new Connect(buffer);
@@ -118,26 +118,40 @@ namespace RxMqtt.Broker
 
                     Send(new SubscribeAck(subscribeMsg.PacketId));
 
-                    foreach (var topic in subscribeMsg.Topics)
-                    {
-                        if (_subscriptions.Contains(topic))
-                            continue;
-
-                        _subscriptions.Add(topic);
-                        _brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(SubscriptionHandler);
-
-                        _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
-                    }
+                    Subscribe(subscribeMsg.Topics);
                     break;
                 case MsgType.PublishAck:
 
                     break;
                 case MsgType.Disconnect:
-
+                    MqttBroker.Disconnect(ClientId);
                     break;
                 default:
                     _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(buffer)}'");
                     break;
+            }
+        }
+
+        private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic
+        {
+            foreach (var topic in topics)
+            {
+                if (_subscriptions.Contains(topic))
+                    continue;
+
+                _subscriptions.Add(topic);
+
+                if (topic.EndsWith("#"))
+                {
+                    var newtopic = topic.Replace("#", "");
+                    _brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish);
+                }
+                else
+                {
+                    _brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNextPublish);
+                }
+                
+                _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
             }
         }
 
@@ -154,7 +168,7 @@ namespace RxMqtt.Broker
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, e);
+                _logger.Log(LogLevel.Error, $"Send => '{e.Message}'");
             }
         }
     }
