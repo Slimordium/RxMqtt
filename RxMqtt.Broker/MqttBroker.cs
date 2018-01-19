@@ -69,7 +69,7 @@ namespace RxMqtt.Broker
 
         private void AcceptConnectionCallback(IAsyncResult asyncResult)
         {
-            _acceptConnectionResetEvent.Set();
+            _clients.RemoveAll(t => t.IsCompleted);
 
             _logger.Log(LogLevel.Trace, $"Client connecting...");
 
@@ -87,6 +87,8 @@ namespace RxMqtt.Broker
                                 , TaskCreationOptions.LongRunning));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
+
+            _acceptConnectionResetEvent.Set();
         }
     }
 }
