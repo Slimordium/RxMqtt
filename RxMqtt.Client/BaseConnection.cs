@@ -18,8 +18,6 @@ namespace RxMqtt.Client
         protected static Subject<Publish> _publishSubject;
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly object _pubSync = new object();
-
         protected string HostName;
 
         public IObservable<IList<Publish>> PublishObservable { get; set; }
@@ -43,11 +41,34 @@ namespace RxMqtt.Client
                 _publishSubject = new Subject<Publish>();
 
                 AckObservable = _ackSubject.AsObservable().Buffer(1);
-                PublishObservable = _publishSubject.AsObservable().Synchronize(_pubSync).Buffer(1);
+                PublishObservable = _publishSubject.AsObservable().Buffer(1);
             }
             catch (Exception e)
             {
                 _logger.Log(LogLevel.Error, e);
+            }
+        }
+
+        protected void OnReceived(byte[] buffer)
+        {
+            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+
+            _logger.Log(LogLevel.Trace, $"In <= {msgType}");
+
+            switch (msgType)
+            {
+                case MsgType.Publish:
+                    var msg = new Publish(buffer);
+                    _publishSubject.OnNext(msg);
+                    break;
+                case MsgType.ConnectAck:
+                    _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, 0));
+                    break;
+                case MsgType.PingResponse:
+                    break;
+                default:
+                    _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, MqttMessage.BytesToUshort(new[] { buffer[1], buffer[2] })));
+                    break;
             }
         }
     }

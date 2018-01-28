@@ -21,7 +21,6 @@ namespace RxMqtt.Client
         private readonly object _syncWrite = new object();
         private IObservable<MqttMessage> _observable;
         private Status _status = Status.Error;
-        private static int _publishCount;
         private readonly int _port;
 
         internal TcpConnection
@@ -109,13 +108,6 @@ namespace RxMqtt.Client
                     return;
                 }
 
-                if (_publishCount >= 3)
-                {
-                    _logger.Log(LogLevel.Trace, $"Hung publish?");
-                    ReEstablishConnection();
-                    return;
-                }
-
                 _logger.Log(LogLevel.Trace, $"Out => {message.MsgType}");
 
                 try
@@ -128,11 +120,9 @@ namespace RxMqtt.Client
                         return;
                     }
 
-                    Interlocked.Increment(ref _publishCount);
-
                     var asyncResult = _stream.BeginWrite(buffer, 0, buffer.Length, EndWrite, _stream);
 
-                    asyncResult.AsyncWaitHandle.WaitOne();
+                    asyncResult.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(_keepAliveInSeconds + 2));
                 }
                 catch (ObjectDisposedException)
                 {
@@ -230,7 +220,7 @@ namespace RxMqtt.Client
             }
         }
 
-        private static void BeginRead(Stream stream)
+        private void BeginRead(Stream stream)
         {
             try
             {
@@ -247,7 +237,7 @@ namespace RxMqtt.Client
             }
         }
 
-        private static void EndRead(IAsyncResult asyncResult, byte[] buffer)
+        private void EndRead(IAsyncResult asyncResult, byte[] buffer)
         {
             try
             {
@@ -260,26 +250,7 @@ namespace RxMqtt.Client
                     var newBuffer = new byte[bytesIn];
                     Array.Copy(buffer, newBuffer, bytesIn);
 
-                    var msgType = (MsgType) (byte) ((newBuffer[0] & 0xf0) >> (byte) MsgOffset.Type);
-
-                    _logger.Log(LogLevel.Trace, $"In <= {msgType}");
-
-                    switch (msgType) {
-                        case MsgType.Publish:
-                            var msg = new Publish(newBuffer);
-                            _publishSubject.OnNext(msg);
-                            break;
-                        case MsgType.ConnectAck:
-                            _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, 0));
-                            break;
-                        case MsgType.PingResponse:
-                            break;
-                        default:
-                            _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, MqttMessage.BytesToUshort(new [] { newBuffer[1], newBuffer[2] })));
-                            break;
-                    }
-
-                    Interlocked.Decrement(ref _publishCount);
+                    OnReceived(newBuffer);
                 }
             }
             catch (ObjectDisposedException)
@@ -340,8 +311,6 @@ namespace RxMqtt.Client
 
                     if (status == Status.Initialized)
                     {
-                        _publishCount = 0;
-
                         BeginRead(_stream);
 
                         WriteSubject.OnNext(new Connect(_connectionId, _keepAliveInSeconds));
