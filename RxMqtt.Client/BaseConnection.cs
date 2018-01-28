@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using NLog;
@@ -21,9 +22,9 @@ namespace RxMqtt.Client
 
         protected string HostName;
 
-        public IObservable<Publish> PublishObservable { get; set; }
+        public IObservable<IList<Publish>> PublishObservable { get; set; }
 
-        public IObservable<Tuple<MsgType, int>> AckObservable { get; set; }
+        public IObservable<IList<Tuple<MsgType, int>>> AckObservable { get; set; }
 
         public Subject<MqttMessage> WriteSubject { get; } = new Subject<MqttMessage>();
 
@@ -41,8 +42,8 @@ namespace RxMqtt.Client
                 _ackSubject = new Subject<Tuple<MsgType, int>>();
                 _publishSubject = new Subject<Publish>();
 
-                AckObservable = _ackSubject.AsObservable();
-                PublishObservable = _publishSubject.AsObservable().Synchronize(_pubSync);
+                AckObservable = _ackSubject.AsObservable().Buffer(1);
+                PublishObservable = _publishSubject.AsObservable().Synchronize(_pubSync).Buffer(1);
             }
             catch (Exception e)
             {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reactive.Subjects;
 using System.Threading.Tasks;
 using RxMqtt.Shared;
@@ -10,9 +11,9 @@ namespace RxMqtt.Client
     {
         Subject<MqttMessage> WriteSubject { get; }
 
-        IObservable<Publish> PublishObservable { get; }
+        IObservable<IList<Publish>> PublishObservable { get; }
 
-        IObservable<Tuple<MsgType, int>> AckObservable { get; }
+        IObservable<IList<Tuple<MsgType, int>>> AckObservable { get; }
 
         Task<Status> Initialize();
     }

@@ -32,7 +32,7 @@ namespace RxMqtt.Client.Console
 
             var client = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 60); // "172.16.0.244"
 
-            client.InitializeAsync().Wait();
+            client.InitializeAsync();
 
             while (true)
             {

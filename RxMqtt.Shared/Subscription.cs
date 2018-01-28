@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using NLog;
@@ -27,8 +28,10 @@ namespace RxMqtt.Shared
             Disposable?.Dispose();
         }
 
-        internal void PublishReceived(Publish msg)
+        internal void PublishReceived(IList<Publish> publishes)
         {
+            var msg = publishes[0];
+
             try
             {
                 if (!msg.Topic.Equals(Topic, StringComparison.InvariantCultureIgnoreCase))

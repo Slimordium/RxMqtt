@@ -14,12 +14,12 @@ namespace RxMqtt.Broker.Console
         {
             var cts = new CancellationTokenSource();
 
-         
-
-                var broker = new MqttBroker();
-                broker.StartListening(cts.Token);
-
-
+            Task.Factory.StartNew(() =>
+                {
+                    var broker = new MqttBroker();
+                    broker.StartListening(cts.Token);
+                }
+                , TaskCreationOptions.LongRunning);
 
             System.Console.ReadLine();
             cts.Cancel();
