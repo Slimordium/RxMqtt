@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
@@ -62,6 +61,8 @@ namespace RxMqtt.Client
 
             _disposed = true;
 
+            _keepAliveDisposable?.Dispose();
+
             _connection?.Dispose();
         }
         
@@ -75,6 +76,7 @@ namespace RxMqtt.Client
         private ushort _keepAliveInSeconds;
         private Timer _keepAliveTimer;
         private Status _status = Status.Error;
+        private IDisposable _keepAliveDisposable;
 
         #endregion
 
@@ -85,17 +87,15 @@ namespace RxMqtt.Client
             if (_status == Status.Initialized || _status == Status.Initializing)
                 return _status;
 
-            var tcs = new TaskCompletionSource<Status>();
-
             _status = await _connection.Initialize();
 
             if (_status != Status.Initialized)
                 return _status;
 
             _connection.AckObservable
-                .Subscribe(async m =>
+                .Subscribe(async message =>
                 {
-                    if (m[0].Item1 == MsgType.ConnectAck)
+                    if (message != null && message.Item1 == MsgType.ConnectAck)
                         await RefreshSubscriptions().ConfigureAwait(false);
                 });
 
@@ -106,60 +106,43 @@ namespace RxMqtt.Client
 
             _connection.WriteSubject.OnNext(new Connect(_connectionId, _keepAliveInSeconds));
 
-            var ack = await WaitForAck(MsgType.ConnectAck);
+            var ack = await _connection.WaitForAck(MsgType.ConnectAck);
 
             if (!ack)
                 _status = Status.Error;
 
             _keepAliveTimer = new Timer(Ping);
 
-            _connection.WriteSubject.Subscribe(ResetKeepAliveTimer);
-
-            _connection.PublishObservable.Subscribe(PublishAck);
+            _keepAliveDisposable = _connection.WriteSubject.Subscribe(ResetKeepAliveTimer);
 
             return _status;
         }
 
-        private async Task<bool> WaitForAck(MsgType msgType, int packetId = -1)
-        {
-            var tcs = new TaskCompletionSource<bool>();
-            var retryCount = 0;
-            var shouldBreak = false;
+        //private async Task<bool> WaitForAck(MsgType msgType, CancellationToken cancellationToken = default(CancellationToken), int? packetId = null)
+        //{
+        //    var tcs = new TaskCompletionSource<bool>(cancellationToken);
 
-            while (retryCount <= 15 && !shouldBreak)
-            {
-                var msgs = await _connection.AckObservable.FirstAsync();
+        //    IDisposable disposable = null;
 
-                retryCount++;
+        //    var onNext = new Action<Tuple<MsgType, int>>(ackMessage =>
+        //    {
+        //        if (ackMessage == null)
+        //            return;
 
-                foreach (var msg in msgs)
-                {
-                    if (packetId == -1)
-                    {
-                        if (msg.Item1 != msgType)
-                            continue;
+        //        tcs.SetResult(true);
+        //    });
 
-                    }
+        //    if (packetId == null)
+        //        disposable = _connection.AckObservable.Where(p => p != null && p.Item1 == msgType).Subscribe(onNext);
+        //    else
+        //        disposable = _connection.AckObservable.Where(p => p != null && p.Item1 == msgType && p.Item2 == packetId).Subscribe(onNext);
 
-                    if (packetId >= 0)
-                    {
-                        if (msg.Item1 != msgType || msg.Item2 != packetId)
-                            continue;
-                    }
+        //    var waitForAck = await tcs.Task;
 
-                    shouldBreak = true;
-                    tcs.SetResult(true);
-                    break;
-                }
-            }
+        //    disposable.Dispose();
 
-            if (retryCount >= 15 && !shouldBreak)
-            {
-                tcs.SetResult(false);
-            }
-
-            return await tcs.Task;
-        }
+        //    return waitForAck;
+        //}
 
         public async Task<bool> PublishAsync(string message, string topic, TimeSpan timeout = default(TimeSpan))
         {
@@ -221,23 +204,11 @@ namespace RxMqtt.Client
         #endregion
 
         #region PrivateMethods
-        private async Task<bool> PublishAndWaitForAck(Publish message, CancellationToken cancellationToken)
+        private Task<bool> PublishAndWaitForAck(Publish message, CancellationToken cancellationToken)
         {
-            var tcsAck = new TaskCompletionSource<Publish>();
-
-            cancellationToken.Register(() => { tcsAck.TrySetCanceled(); });
-
             _connection.WriteSubject.OnNext(message);
 
-            return await WaitForAck(MsgType.PublishAck, message.PacketId);
-        }
-
-        private void PublishAck(IList<Publish> mqttMessage)
-        {
-            foreach (var message in mqttMessage)
-            {
-                _connection.WriteSubject.OnNext(new PublishAck(message.PacketId));
-            }
+            return _connection.WaitForAck(MsgType.PublishAck, cancellationToken, message.PacketId);
         }
 
         private void Ping(object sender)
@@ -281,7 +252,7 @@ namespace RxMqtt.Client
 
                         _connection.WriteSubject.OnNext(subscribeMessage);
 
-                        tcs.SetResult(await WaitForAck(MsgType.SubscribeAck, subscribeMessage.PacketId));
+                        tcs.SetResult(await _connection.WaitForAck(MsgType.SubscribeAck, cts.Token, subscribeMessage.PacketId));
                     }
                 }
             }
@@ -307,7 +278,7 @@ namespace RxMqtt.Client
 
             _connection.WriteSubject.OnNext(subscribeMessage);
 
-            tcs.SetResult(await WaitForAck(MsgType.SubscribeAck, subscribeMessage.PacketId));
+            tcs.SetResult(await _connection.WaitForAck(MsgType.SubscribeAck, CancellationToken.None, subscribeMessage.PacketId));
 
             await tcs.Task;
         }
@@ -330,7 +301,7 @@ namespace RxMqtt.Client
 
                 _connection.WriteSubject.OnNext(unsubscribeMessage);
 
-                tcs.SetResult(await WaitForAck(MsgType.SubscribeAck, unsubscribeMessage.PacketId));
+                tcs.SetResult(await _connection.WaitForAck(MsgType.SubscribeAck, CancellationToken.None, unsubscribeMessage.PacketId));
             }
            
             return await tcs.Task;

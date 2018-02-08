@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace RxMqtt.Shared
@@ -12,5 +13,7 @@ namespace RxMqtt.Shared
         Task UnsubscribeAsync(Subscription subscription);
     
         Task<bool> PublishAsync(string message, string topic, TimeSpan timeout = default(TimeSpan));
+
+        
     }
 }

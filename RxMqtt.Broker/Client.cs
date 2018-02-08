@@ -4,7 +4,6 @@ using System.Net.Sockets;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
-using System.Threading;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -19,13 +18,15 @@ namespace RxMqtt.Broker
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
-
         private readonly IObservable<byte[]> _clientReceiveObservable;
         private readonly IObservable<Publish> _brokerPublishObservable;
 
         private readonly List<string> _subscriptions = new List<string>();
         private readonly Subject<Publish> _brokerPublishSubject;
+
+        private IDisposable _readDisposable;
+
+        private readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
 
         internal Client(Socket socket, Subject<Publish> brokerPublishSubject)
         {
@@ -39,14 +40,25 @@ namespace RxMqtt.Broker
 
         internal bool Start()
         {
-            _clientReceiveObservable.Subscribe(OnNextIncomingPacket); //Blocks
+            _readDisposable = _clientReceiveObservable.Subscribe(OnNextIncomingPacket); //Blocks
+
+            _logger.Log(LogLevel.Info, $"Disposing ReadSocket");
+
+            _readDisposable.Dispose();
+
+            _logger.Log(LogLevel.Info, $"Disposing {_subscriptionDisposables.Count} subscriptions");
+
+            foreach (var subscriptionDisposable in _subscriptionDisposables)
+            {
+                subscriptionDisposable.Dispose();
+            }
 
             return true;
         }
 
         private IEnumerable<byte[]> ReadSocket()
         {
-            while (!_cancellationTokenSource.IsCancellationRequested)
+            while (true)
             {
                 byte[] packet = null;
                 var buffer = new byte[128000];
@@ -69,21 +81,6 @@ namespace RxMqtt.Broker
                 }
 
                 yield return packet;
-            }
-        }
-
-        internal void Dispose()
-        {
-            try
-            {
-                _socket.Dispose();
-                _cancellationTokenSource.Cancel();
-            }
-            catch (Exception)
-            {
-                //
-
-
             }
         }
 
@@ -156,11 +153,11 @@ namespace RxMqtt.Broker
                 if (topic.EndsWith("#"))
                 {
                     var newtopic = topic.Replace("#", "");
-                    _brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish);
+                    _subscriptionDisposables.Add(_brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish));
                 }
                 else
                 {
-                    _brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNextPublish);
+                    _subscriptionDisposables.Add(_brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNextPublish));
                 }
                 
                 _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");

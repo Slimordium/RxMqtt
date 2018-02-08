@@ -1,11 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 
@@ -13,18 +15,18 @@ namespace RxMqtt.Client
 {
     internal abstract class BaseConnection
     {
-        protected static Subject<Tuple<MsgType, int>> _ackSubject;
+        protected ISubject<Tuple<MsgType, int>> _ackSubject;
 
-        protected static Subject<Publish> _publishSubject;
+        protected ISubject<Publish> _publishSubject;
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
         protected string HostName;
 
-        public IObservable<IList<Publish>> PublishObservable { get; set; }
+        public IObservable<Publish> PublishObservable { get; set; }
 
-        public IObservable<IList<Tuple<MsgType, int>>> AckObservable { get; set; }
+        public IObservable<Tuple<MsgType, int>> AckObservable { get; set; }
 
-        public Subject<MqttMessage> WriteSubject { get; } = new Subject<MqttMessage>();
+        public ISubject<MqttMessage> WriteSubject { get; } = new BehaviorSubject<MqttMessage>(null);
 
         protected abstract void DisposeStreams();
 
@@ -34,14 +36,11 @@ namespace RxMqtt.Client
         {
             try
             {
-                _ackSubject?.Dispose();
-                _publishSubject?.Dispose();
+                _ackSubject = new BehaviorSubject<Tuple<MsgType, int>>(null);
+                _publishSubject = new BehaviorSubject<Publish>(null);
 
-                _ackSubject = new Subject<Tuple<MsgType, int>>();
-                _publishSubject = new Subject<Publish>();
-
-                AckObservable = _ackSubject.AsObservable().Buffer(1);
-                PublishObservable = _publishSubject.AsObservable().Buffer(1);
+                AckObservable = _ackSubject.AsObservable();
+                PublishObservable = _publishSubject.AsObservable();
             }
             catch (Exception e)
             {
@@ -53,13 +52,18 @@ namespace RxMqtt.Client
         {
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
-            _logger.Log(LogLevel.Trace, $"In <= {msgType}");
+            _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
             switch (msgType)
             {
                 case MsgType.Publish:
                     var msg = new Publish(buffer);
                     _publishSubject.OnNext(msg);
+
+                    WriteSubject.OnNext(new PublishAck(msg.PacketId));
+
+                    _logger.Log(LogLevel.Trace, $"In <= '{msgType}' - '{msg.PacketId}'");
+
                     break;
                 case MsgType.ConnectAck:
                     _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, 0));
@@ -67,9 +71,41 @@ namespace RxMqtt.Client
                 case MsgType.PingResponse:
                     break;
                 default:
-                    _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, MqttMessage.BytesToUshort(new[] { buffer[1], buffer[2] })));
+                    var msgId = MqttMessage.BytesToUshort(new[] {buffer[2], buffer[3]});
+
+                    _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, msgId));
                     break;
             }
+        }
+
+        public async Task<bool> WaitForAck(MsgType msgType, CancellationToken cancellationToken = default(CancellationToken), int? packetId = null)
+        {
+            _logger.Log(LogLevel.Info, $"WaitForAck '{msgType}' - '{packetId}'");
+
+            var tcs = new TaskCompletionSource<bool>(cancellationToken);
+
+            IDisposable disposable = null;
+
+            var onNext = new Action<Tuple<MsgType, int>>(ackMessage =>
+            {
+                if (ackMessage == null)
+                    return;
+
+                tcs.SetResult(true);
+            });
+
+            if (packetId == null)
+                disposable = AckObservable.Where(p => p != null && p.Item1 == msgType).Subscribe(onNext);
+            else
+                disposable = AckObservable.Where(p => p != null && p.Item1 == msgType && p.Item2 == packetId).Subscribe(onNext);
+
+            var waitForAck = await tcs.Task;
+
+            _logger.Log(LogLevel.Info, $"WaitForAck Received '{msgType}' - '{packetId}'");
+
+            disposable.Dispose();
+
+            return waitForAck;
         }
     }
 }

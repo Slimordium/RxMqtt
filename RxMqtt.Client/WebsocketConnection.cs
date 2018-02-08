@@ -103,5 +103,10 @@ namespace RxMqtt.Client
 
             return arraySegment.Array;
         }
+
+        public Task<bool> WaitForAck(MsgType msgType, CancellationToken cancellationToken = new CancellationToken(), int? packetId = null)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

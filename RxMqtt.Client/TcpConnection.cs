@@ -4,7 +4,9 @@ using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Reflection;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
@@ -19,7 +21,7 @@ namespace RxMqtt.Client
     internal class TcpConnection : BaseConnection, IConnection
     {
         private readonly object _syncWrite = new object();
-        private IObservable<MqttMessage> _observable;
+        //private IObservable<MqttMessage> _observable;
         private Status _status = Status.Error;
         private readonly int _port;
 
@@ -93,6 +95,10 @@ namespace RxMqtt.Client
             return _status;
         }
 
+        private IDisposable _writeDisposable;
+
+        private IObservable<MqttMessage> _observable;
+
         private void BeginReadWrite()
         {
             BeginRead(_stream);
@@ -101,8 +107,11 @@ namespace RxMqtt.Client
 
             _observable = WriteSubject.AsObservable().Synchronize(_syncWrite);
 
-            _observable.Subscribe(message =>
+            _writeDisposable = _observable.Subscribe(message =>
             {
+                if (message == null)
+                    return;
+
                 if (_status != Status.Initialized)
                 {
                     return;
@@ -267,6 +276,32 @@ namespace RxMqtt.Client
 
             BeginRead(_stream);
         }
+
+        //protected new void OnReceived(byte[] buffer)
+        //{
+        //    var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+
+        //    _logger.Log(LogLevel.Trace, $"In <= {msgType}");
+
+        //    switch (msgType)
+        //    {
+        //        case MsgType.Publish:
+        //            var msg = new Publish(buffer);
+        //            _publishSubject.OnNext(msg);
+
+        //            WriteSubject.OnNext(new PublishAck(msg.PacketId));
+
+        //            break;
+        //        case MsgType.ConnectAck:
+        //            _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, 0));
+        //            break;
+        //        case MsgType.PingResponse:
+        //            break;
+        //        default:
+        //            _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, MqttMessage.BytesToUshort(new[] { buffer[1], buffer[2] })));
+        //            break;
+        //    }
+        //}
 
         private static Task _connectTask;
 

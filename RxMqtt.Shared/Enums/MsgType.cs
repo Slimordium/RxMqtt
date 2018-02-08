@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 namespace RxMqtt.Shared
 {
     [Flags]
-    internal enum MsgType : byte
+    public enum MsgType : byte
     {
         Connect = 0x01,
         ConnectAck = 0x02,

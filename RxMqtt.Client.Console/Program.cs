@@ -10,8 +10,9 @@ namespace RxMqtt.Client.Console
 
 #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
 
-    class Program
-    {
+    class Program{
+        private static MqttClient _mqttClient;
+
         static void Main(string[] args)
         {
             var defaultClientId = $"client-{DateTime.Now.Hour}.{DateTime.Now.Minute}.{DateTime.Now.Millisecond}";
@@ -30,9 +31,9 @@ namespace RxMqtt.Client.Console
             if (string.IsNullOrEmpty(ip))
                 ip = "127.0.0.1";
 
-            var client = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 60); // "172.16.0.244"
+            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 120); // "172.16.0.244"
 
-            client.InitializeAsync();
+            _mqttClient.InitializeAsync();
 
             while (true)
             {
@@ -56,7 +57,7 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(line))
                         continue;
 
-                    client.SubscribeAsync(new Subscription(Handler, line.Trim()));
+                    _mqttClient.SubscribeAsync(new Subscription(Handler, line.Trim()));
 
                     System.Console.WriteLine("subscribed");
                 }
@@ -70,10 +71,34 @@ namespace RxMqtt.Client.Console
                 System.Console.WriteLine("Message to publish:");
                 var msg = System.Console.ReadLine();
 
-                client.PublishAsync(msg, topic);
+                System.Console.WriteLine("Publish count (1):");
+                var count = System.Console.ReadLine();
+
+                if (string.IsNullOrEmpty(count))
+                    count = "1";
+
+                Publish(msg, topic, count).ConfigureAwait(false);
 
                 System.Console.WriteLine("published");
             }
+        }
+
+        private static async Task<bool> Publish(string msg, string topic, string count)
+        {
+            var tcs = new TaskCompletionSource<bool>();
+
+            Task.Run(async () =>
+            {
+                for (var i = 1; i <= Convert.ToInt32(count); i++)
+                {
+                    var result = await _mqttClient.PublishAsync(msg, topic);
+                }
+
+                tcs.SetResult(true);
+
+            });
+
+            return await tcs.Task;
         }
 
         private static Task Handler(object o, string s)
