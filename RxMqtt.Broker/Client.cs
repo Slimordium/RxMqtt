@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
+using System.Threading;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -28,8 +29,11 @@ namespace RxMqtt.Broker
 
         private readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
 
-        internal Client(Socket socket, Subject<Publish> brokerPublishSubject)
+        private CancellationToken _cancellationToken;
+
+        internal Client(Socket socket, Subject<Publish> brokerPublishSubject, CancellationToken cancellationToken)
         {
+            _cancellationToken = cancellationToken;
             _socket = socket;
 
             _brokerPublishSubject = brokerPublishSubject;
@@ -58,7 +62,7 @@ namespace RxMqtt.Broker
 
         private IEnumerable<byte[]> ReadSocket()
         {
-            while (true)
+            while (!_cancellationToken.IsCancellationRequested)
             {
                 byte[] packet = null;
                 var buffer = new byte[128000];
@@ -73,6 +77,8 @@ namespace RxMqtt.Broker
                     packet = new byte[bytesIn];
 
                     Array.Copy(buffer, 0, packet, 0, bytesIn);
+
+                    _logger.Log(LogLevel.Info, BitConverter.ToString(packet));
                 }
                 catch (Exception e)
                 {

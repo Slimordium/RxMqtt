@@ -26,10 +26,17 @@ namespace RxMqtt.Broker
 
         private volatile bool _started;
 
+        private CancellationTokenSource _cancellationTokenSource;
+
         /// <summary>
         /// Clients/sockets
         /// </summary>
         private readonly List<Task> _clients = new List<Task>();
+
+        ~MqttBroker()
+        {
+            _cancellationTokenSource.Cancel();
+        }
 
         public MqttBroker()
         {
@@ -53,7 +60,7 @@ namespace RxMqtt.Broker
             _port = port;
         }
 
-        public void StartListening(CancellationToken cancellationToken)
+        public void StartListening(CancellationToken cancellationToken = default(CancellationToken))
         {
             if (_started)
             {
@@ -63,15 +70,17 @@ namespace RxMqtt.Broker
 
             _started = true;
 
+            _cancellationTokenSource = cancellationToken != default(CancellationToken) ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken) : new CancellationTokenSource();
+
             _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}:{_port}'");
 
             _ipEndPoint = new IPEndPoint(_ipAddress, _port);
             var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { UseOnlyOverlappedIO = true };
 
             listener.Bind(_ipEndPoint);
-            listener.Listen(5);
+            listener.Listen(15);
 
-            while (!cancellationToken.IsCancellationRequested)
+            while (!_cancellationTokenSource.IsCancellationRequested)
             {
                 try
                 {
@@ -82,6 +91,7 @@ namespace RxMqtt.Broker
                 catch (Exception e)
                 {
                     _logger.Log(LogLevel.Error, e);
+                    _cancellationTokenSource.Cancel();
                     throw;
                 }
             }
@@ -99,12 +109,12 @@ namespace RxMqtt.Broker
             socket.UseOnlyOverlappedIO = true;
 
             _clients.Add(Task.Factory.StartNew(() =>
-                                {
-                                    var client = new Client(socket, _publishSubject);
-                                    var completed = client.Start();
-                                    _logger.Log(LogLevel.Trace, "Client task completed");
-                                }
-                                , TaskCreationOptions.LongRunning));
+                {
+                    var client = new Client(socket, _publishSubject, CancellationTokenSource.CreateLinkedTokenSource(_cancellationTokenSource.Token).Token);
+                    var completed = client.Start();
+                    _logger.Log(LogLevel.Trace, "Client task completed");
+                }
+                , TaskCreationOptions.LongRunning));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 
