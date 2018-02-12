@@ -18,7 +18,9 @@ namespace RxMqtt.Broker
 
         private readonly IPAddress _ipAddress = IPAddress.Any;
 
-        private readonly Subject<Publish> _publishSubject = new Subject<Publish>();
+        private readonly ISubject<Publish> _publishSubject = new Subject<Publish>();
+
+        private readonly ISubject<KeyValuePair<string, string>> _topicSubject = new Subject<KeyValuePair<string, string>>();
 
         private readonly int _port = 1883;
 
@@ -27,6 +29,10 @@ namespace RxMqtt.Broker
         private volatile bool _started;
 
         private CancellationTokenSource _cancellationTokenSource;
+
+        private readonly List<KeyValuePair<string, string>> _availableTopics = new List<KeyValuePair<string, string>>();
+
+        private IDisposable _topicDisposable;
 
         /// <summary>
         /// Clients/sockets
@@ -70,6 +76,11 @@ namespace RxMqtt.Broker
 
             _started = true;
 
+            _topicDisposable = _topicSubject.Subscribe(topic =>
+            {
+                _availableTopics.Add(topic);
+            });
+
             _cancellationTokenSource = cancellationToken != default(CancellationToken) ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken) : new CancellationTokenSource();
 
             _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}:{_port}'");
@@ -110,7 +121,7 @@ namespace RxMqtt.Broker
 
             _clients.Add(Task.Factory.StartNew(() =>
                 {
-                    var client = new Client(socket, _publishSubject, CancellationTokenSource.CreateLinkedTokenSource(_cancellationTokenSource.Token).Token);
+                    var client = new Client(socket, _publishSubject, _topicSubject, CancellationTokenSource.CreateLinkedTokenSource(_cancellationTokenSource.Token).Token);
                     var completed = client.Start();
                     _logger.Log(LogLevel.Trace, "Client task completed");
                 }

@@ -40,23 +40,12 @@ namespace RxMqtt.Shared.Messages
 
         internal Publish(byte[] buffer)
         {
-            var index = 5;
+            var r = GetRemainingLength(buffer.Length, new[] { buffer[1], buffer[2], buffer[3], buffer[4] }, 0);
+            var index = r + 3;
 
-            int topicLength = 0;
+            var topicLength = BytesToUshort(new[] { buffer[r + 1], buffer[r + 2] });
 
-            if (buffer.Length > 5)
-                topicLength = BytesToUshort(new[] {buffer[3], buffer[4]});
-            else
-            {
-                Logger.Log(LogLevel.Warn, $"PublishMsg was not valid => {BitConverter.ToString(buffer)}");
-                return;
-            }
-
-            if (topicLength > 128)
-            {
-                index = 4;
-                topicLength = BytesToUshort(new[] { buffer[2], buffer[3] });
-            }
+            Logger.Log(LogLevel.Info, $"Topic length: {topicLength}");
 
             var topicBytes = new byte[topicLength];
 
@@ -64,6 +53,8 @@ namespace RxMqtt.Shared.Messages
 
             index += topicLength;
             Topic = Encoding.UTF8.GetString(topicBytes);
+
+            Logger.Log(LogLevel.Info, $"Topic: {Topic}");
 
             if (index >= buffer.Length + 2)
             {

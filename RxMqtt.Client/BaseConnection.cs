@@ -61,9 +61,6 @@ namespace RxMqtt.Client
                     _publishSubject.OnNext(msg);
 
                     WriteSubject.OnNext(new PublishAck(msg.PacketId));
-
-                    _logger.Log(LogLevel.Trace, $"In <= '{msgType}' - '{msg.PacketId}'");
-
                     break;
                 case MsgType.ConnectAck:
                     _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, 0));
@@ -80,8 +77,6 @@ namespace RxMqtt.Client
 
         public async Task<bool> WaitForAck(MsgType msgType, CancellationToken cancellationToken = default(CancellationToken), int? packetId = null)
         {
-            _logger.Log(LogLevel.Info, $"WaitForAck '{msgType}' - '{packetId}'");
-
             var tcs = new TaskCompletionSource<bool>(cancellationToken);
 
             IDisposable disposable = null;
@@ -100,8 +95,6 @@ namespace RxMqtt.Client
                 disposable = AckObservable.Where(p => p != null && p.Item1 == msgType && p.Item2 == packetId).Subscribe(onNext);
 
             var waitForAck = await tcs.Task;
-
-            _logger.Log(LogLevel.Info, $"WaitForAck Received '{msgType}' - '{packetId}'");
 
             disposable.Dispose();
 

@@ -23,7 +23,8 @@ namespace RxMqtt.Broker
         private readonly IObservable<Publish> _brokerPublishObservable;
 
         private readonly List<string> _subscriptions = new List<string>();
-        private readonly Subject<Publish> _brokerPublishSubject;
+        private readonly ISubject<Publish> _brokerPublishSubject;
+        private readonly ISubject<KeyValuePair<string, string>> _topicSubject;
 
         private IDisposable _readDisposable;
 
@@ -31,10 +32,11 @@ namespace RxMqtt.Broker
 
         private CancellationToken _cancellationToken;
 
-        internal Client(Socket socket, Subject<Publish> brokerPublishSubject, CancellationToken cancellationToken)
+        internal Client(Socket socket, ISubject<Publish> brokerPublishSubject, ISubject<KeyValuePair<string, string>> topicSubject, CancellationToken cancellationToken)
         {
             _cancellationToken = cancellationToken;
             _socket = socket;
+            _topicSubject = topicSubject;
 
             _brokerPublishSubject = brokerPublishSubject;
             _brokerPublishObservable = _brokerPublishSubject.AsObservable();
@@ -77,8 +79,6 @@ namespace RxMqtt.Broker
                     packet = new byte[bytesIn];
 
                     Array.Copy(buffer, 0, packet, 0, bytesIn);
-
-                    _logger.Log(LogLevel.Info, BitConverter.ToString(packet));
                 }
                 catch (Exception e)
                 {
@@ -155,6 +155,8 @@ namespace RxMqtt.Broker
                     continue;
 
                 _subscriptions.Add(topic);
+
+                _topicSubject.OnNext(new KeyValuePair<string, string>(_clientId, topic));
 
                 if (topic.EndsWith("#"))
                 {

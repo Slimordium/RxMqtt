@@ -123,7 +123,7 @@ namespace RxMqtt.Client
                 {
                     var buffer = message.GetBytes();
 
-                    if (buffer.Length > 128000)
+                    if (buffer.Length > 400000)
                     {
                         _logger.Log(LogLevel.Trace, "Message size greater than maximum of 128KB?");
                         return;
