@@ -82,7 +82,7 @@ namespace RxMqtt.Broker
                 }
                 catch (Exception e)
                 {
-                    _logger.Log(LogLevel.Warn, e.Message);
+                    _logger.Log(LogLevel.Info, e.Message);
                     break;
                 }
 
@@ -103,7 +103,7 @@ namespace RxMqtt.Broker
 
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
-            _logger.Log(LogLevel.Trace, $"In <= {msgType}");
+            _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
             switch (msgType)
             {
@@ -174,7 +174,7 @@ namespace RxMqtt.Broker
 
         private void Send(MqttMessage message)
         {
-            _logger.Log(LogLevel.Info, $"Out => {message.MsgType} '");
+            _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}'");
 
             try
             {

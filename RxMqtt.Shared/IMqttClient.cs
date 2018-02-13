@@ -8,9 +8,9 @@ namespace RxMqtt.Shared
     {
         Task<Status> InitializeAsync();
 
-        Task SubscribeAsync(Subscription subscription);
+        Task SubscribeAsync(ISubscription subscription);
 
-        Task UnsubscribeAsync(Subscription subscription);
+        Task UnsubscribeAsync(ISubscription subscription);
     
         Task<bool> PublishAsync(string message, string topic, TimeSpan timeout = default(TimeSpan));
 

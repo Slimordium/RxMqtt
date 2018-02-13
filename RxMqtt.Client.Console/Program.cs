@@ -101,7 +101,7 @@ namespace RxMqtt.Client.Console
             return await tcs.Task;
         }
 
-        private static Task Handler(object o, string s)
+        private static Task Handler(string s)
         {
             return Task.Run((() =>
             {

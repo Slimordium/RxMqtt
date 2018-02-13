@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -118,32 +117,6 @@ namespace RxMqtt.Client
             return _status;
         }
 
-        //private async Task<bool> WaitForAck(MsgType msgType, CancellationToken cancellationToken = default(CancellationToken), int? packetId = null)
-        //{
-        //    var tcs = new TaskCompletionSource<bool>(cancellationToken);
-
-        //    IDisposable disposable = null;
-
-        //    var onNext = new Action<Tuple<MsgType, int>>(ackMessage =>
-        //    {
-        //        if (ackMessage == null)
-        //            return;
-
-        //        tcs.SetResult(true);
-        //    });
-
-        //    if (packetId == null)
-        //        disposable = _connection.AckObservable.Where(p => p != null && p.Item1 == msgType).Subscribe(onNext);
-        //    else
-        //        disposable = _connection.AckObservable.Where(p => p != null && p.Item1 == msgType && p.Item2 == packetId).Subscribe(onNext);
-
-        //    var waitForAck = await tcs.Task;
-
-        //    disposable.Dispose();
-
-        //    return waitForAck;
-        //}
-
         public async Task<bool> PublishAsync(string message, string topic, TimeSpan timeout = default(TimeSpan))
         {
             if (timeout == default(TimeSpan))
@@ -177,28 +150,26 @@ namespace RxMqtt.Client
         /// </summary>
         /// <param name="subscription"></param>
         /// <returns></returns>
-        public async Task SubscribeAsync(Subscription subscription)
+        public async Task SubscribeAsync(ISubscription subscription)
         {
-            var streamSubscriptionDisposable = _connection.PublishObservable.Subscribe(subscription.PublishReceived);
-
             if (!IsAlreadySubscribed(subscription.Topic))
                 await AddSubscription(subscription.Topic);
 
-            subscription.Disposable = streamSubscriptionDisposable;
+            subscription.Subscribe(_connection.PublishObservable);
         }
 
         /// <summary>
         /// </summary>
         /// <param name="subscription"></param>
         /// <returns></returns>
-        public async Task UnsubscribeAsync(Subscription subscription)
+        public async Task UnsubscribeAsync(ISubscription subscription)
         {
             _logger.Log(LogLevel.Trace, $"Unsubscribe from {subscription.Topic}");
 
             if (IsAlreadySubscribed(subscription.Topic))
                 await RemoveSubscription(subscription.Topic);
 
-            subscription.Disposable.Dispose();
+            subscription.SubscriptionDisposable.Dispose();
         }
 
         #endregion

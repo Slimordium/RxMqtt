@@ -11,7 +11,6 @@
   <ItemGroup>
     <PackageReference Include="NLog" Version="4.5.0-rc04" />
     <PackageReference Include="System.Net.WebSockets.Client" Version="4.3.2" />
-    <PackageReference Include="System.Reactive" Version="4.0.0-preview00001" />
   </ItemGroup>
 
   <ItemGroup>

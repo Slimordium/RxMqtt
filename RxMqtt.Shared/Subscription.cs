@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using NLog;
@@ -7,49 +6,52 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared
 {
-    public class Subscription
+    public class Subscription : ISubscription
     {
-        internal string Topic { get; }
+        public string Topic { get; }
 
-        internal IDisposable Disposable { get; set; }
+        public IDisposable SubscriptionDisposable { get; private set; }
 
-        internal ILogger Logger = LogManager.GetCurrentClassLogger();
+        private readonly ILogger _logger;
 
-        public event Func<object, string, Task> SubscriptionEvent;
+        private readonly Func<string, Task> _subscriptionCallback;
 
-        public Subscription(Func<object, string, Task> handler, string topic)
+        public Subscription(Func<string, Task> callback, string topic)
         {
-            SubscriptionEvent = handler;
+            _logger = LogManager.GetLogger($"Subscription-{topic}");
+
+            _subscriptionCallback = callback;
+
             Topic = topic;
         }
 
-        ~Subscription()
+        public void Subscribe(IObservable<Publish> observable)
         {
-            Disposable?.Dispose();
+            SubscriptionDisposable = observable.Subscribe(PublishReceived);
         }
 
-        internal void PublishReceived(Publish msg)
+        private void PublishReceived(Publish msg)
         {
             if (msg == null)
                 return;
 
             try
             {
-                if (!msg.Topic.Equals(Topic, StringComparison.InvariantCultureIgnoreCase))
+                if (!msg.Topic.StartsWith(Topic, StringComparison.InvariantCultureIgnoreCase))
                     return;
 
-                var handler = SubscriptionEvent;
+                var handler = _subscriptionCallback;
 
                 if (handler == null)
                     return;
 
                 var invocationList = handler.GetInvocationList();
 
-                Parallel.ForEach(invocationList, func => { handler(this, Encoding.UTF8.GetString(msg.Message)); });
+                Parallel.ForEach(invocationList, async func => { await handler(Encoding.UTF8.GetString(msg.Message)); });
             }
             catch (Exception e)
             {
-                Logger.Log(LogLevel.Error, e);
+                _logger.Log(LogLevel.Error, e);
             }
         }
     }

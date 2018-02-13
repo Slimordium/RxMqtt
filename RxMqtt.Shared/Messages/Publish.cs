@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class Publish : MqttMessage
+    public class Publish : MqttMessage
     {
         private const byte DupFlagMask = 0x08;
         private const byte DupFlagOffset = 0x03;
@@ -44,17 +44,12 @@ namespace RxMqtt.Shared.Messages
             var index = r + 3;
 
             var topicLength = BytesToUshort(new[] { buffer[r + 1], buffer[r + 2] });
-
-            Logger.Log(LogLevel.Info, $"Topic length: {topicLength}");
-
             var topicBytes = new byte[topicLength];
 
             Array.Copy(buffer, index, topicBytes, 0, topicBytes.Length);
 
             index += topicLength;
             Topic = Encoding.UTF8.GetString(topicBytes);
-
-            Logger.Log(LogLevel.Info, $"Topic: {Topic}");
 
             if (index >= buffer.Length + 2)
             {

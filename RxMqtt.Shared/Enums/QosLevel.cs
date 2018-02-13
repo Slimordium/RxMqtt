@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 namespace RxMqtt.Shared
 {
     [Flags]
-    internal enum QosLevel : byte
+    public enum QosLevel : byte
     {
         //AtMostOnce = 0x00,
         AtLeastOnce = 0x01,
