@@ -27,14 +27,21 @@ namespace RxMqtt.Broker
         private readonly ISubject<KeyValuePair<string, string>> _topicSubject;
 
         private IDisposable _readDisposable;
+        private IDisposable _keepAliveDisposable;
 
         private readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
 
-        private CancellationToken _cancellationToken;
+        private readonly CancellationTokenSource _cancellationTokenSource;
+
+        private long _shouldCancel;
+
+        private readonly int _bufferLength;
 
         internal Client(Socket socket, ISubject<Publish> brokerPublishSubject, ISubject<KeyValuePair<string, string>> topicSubject, CancellationToken cancellationToken)
         {
-            _cancellationToken = cancellationToken;
+            _bufferLength = Convert.ToInt32(1e+7);//10 MB
+
+            _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _socket = socket;
             _topicSubject = topicSubject;
 
@@ -64,10 +71,10 @@ namespace RxMqtt.Broker
 
         private IEnumerable<byte[]> ReadSocket()
         {
-            while (!_cancellationToken.IsCancellationRequested)
+            while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
                 byte[] packet = null;
-                var buffer = new byte[128000];
+                var buffer = new byte[_bufferLength];
 
                 try
                 {
@@ -121,11 +128,24 @@ namespace RxMqtt.Broker
 
                     _clientId = connectMsg.ClientId;
 
+                    _keepAliveDisposable?.Dispose();
+
+                    _keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
+                    {
+                        if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
+
+                        _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
+
+                        _cancellationTokenSource.Cancel(false);
+                    });
+
                     _logger = LogManager.GetLogger(_clientId);
 
                     Send(new ConnectAck());
                     break;
                 case MsgType.PingRequest:
+                    
+
                     Send(new PingResponse());
                     break;
                 case MsgType.Subscribe:
@@ -145,6 +165,8 @@ namespace RxMqtt.Broker
                     _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(buffer)}'");
                     break;
             }
+
+            Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
         }
 
         private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic

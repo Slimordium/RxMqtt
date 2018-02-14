@@ -89,7 +89,7 @@ namespace RxMqtt.Broker
             var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { UseOnlyOverlappedIO = true };
 
             listener.Bind(_ipEndPoint);
-            listener.Listen(15);
+            listener.Listen(20);
 
             while (!_cancellationTokenSource.IsCancellationRequested)
             {

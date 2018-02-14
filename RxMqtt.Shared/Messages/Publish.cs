@@ -1,6 +1,8 @@
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using NLog;
 using System.Runtime.CompilerServices;
@@ -9,8 +11,9 @@ using System.Runtime.CompilerServices;
 
 namespace RxMqtt.Shared.Messages
 {
-    public class Publish : MqttMessage
-    {
+    public class Publish : MqttMessage{
+        private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+
         private const byte DupFlagMask = 0x08;
         private const byte DupFlagOffset = 0x03;
 
@@ -36,36 +39,95 @@ namespace RxMqtt.Shared.Messages
             MsgType = MsgType.Publish;
             Topic = topic;
             Message = message ?? new byte[] { 0x00 };
+
+            if (message == null || message.Length > 1e+7)
+                throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7 and cannot be null");
         }
 
         internal Publish(byte[] buffer)
         {
-            var r = GetRemainingLength(buffer.Length, new[] { buffer[1], buffer[2], buffer[3], buffer[4] }, 0);
-            var index = r + 3;
+            if (buffer.Length > 1e+7)
+                throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7 ");
 
-            var topicLength = BytesToUshort(new[] { buffer[r + 1], buffer[r + 2] });
-            var topicBytes = new byte[topicLength];
-
-            Array.Copy(buffer, index, topicBytes, 0, topicBytes.Length);
-
-            index += topicLength;
-            Topic = Encoding.UTF8.GetString(topicBytes);
-
-            if (index >= buffer.Length + 2)
+            try
             {
-                PacketId = 0;
-                Message = new byte[] { 0x00 };
+                var newBuffer = new List<byte>(buffer);
 
-                Logger.Log(LogLevel.Debug, "Buffer does not contain PacketId or Message");
-                return;
+                newBuffer = newBuffer.GetRange(1, newBuffer.Count - 1);
+
+                var publishMessageLength = 0;
+                var index = 0;
+                var bufferAfterGetRemaining = new List<byte>();
+
+                foreach (var @byte in newBuffer)
+                {
+                    index++;
+
+                    if (index == 1 && @byte < 0x7f)
+                    {
+                        publishMessageLength = Convert.ToUInt16(@byte);
+                        bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
+                        break;
+                    }
+
+                    if (@byte > 0x7f)
+                    {
+                        publishMessageLength = publishMessageLength + Convert.ToUInt16(@byte);
+                    }
+                    else
+                    {
+                        publishMessageLength = publishMessageLength + @byte * 128;
+                        bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
+                        break;
+                    }
+                }
+
+                var topicLength = 0;
+                index = 0;
+
+                foreach (var @byte in bufferAfterGetRemaining)
+                {
+                    index++;
+
+                    if (index == 1 && @byte < 0x7f && @byte != 0x00)
+                    {
+                        topicLength = Convert.ToUInt16(@byte);
+
+                        break;
+                    }
+
+                    if (index > 1 && @byte < 0x7f && @byte != 0x00)
+                    {
+                        topicLength = Convert.ToUInt16(@byte);
+
+                        break;
+                    }
+
+                    if (@byte > 0x7f)
+                    {
+                        publishMessageLength = publishMessageLength + Convert.ToUInt16(@byte);
+                    }
+
+                    if (@byte > 0x00 && @byte <= 0x74 && index > 1)
+                    {
+                        topicLength = publishMessageLength + @byte * 128;
+
+                        break;
+                    }
+                }
+
+                Topic = Encoding.UTF8.GetString(bufferAfterGetRemaining.GetRange(index, topicLength).ToArray());
+
+                var bufferAfterGetTopic = bufferAfterGetRemaining.GetRange(index + topicLength, bufferAfterGetRemaining.Count - (index + topicLength));
+
+                PacketId = Convert.ToUInt16(bufferAfterGetTopic[0] + bufferAfterGetTopic[1]);
+
+                Message = bufferAfterGetTopic.GetRange(2, bufferAfterGetTopic.Count - 2).ToArray();
             }
-
-            PacketId = BytesToUshort(new[] {buffer[index++], buffer[index++]});
-
-            var messageSize = buffer.Length - index;
-            Message = new byte[messageSize];
-
-            Array.Copy(buffer, index, Message, 0, buffer.Length - index);
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Error, $"Publish Exception Buffer Length:{buffer.Length}, PacketId:{PacketId}, Topic:{Topic}, Buffer:{Encoding.UTF8.GetString(buffer.ToArray())}");
+            }
         }
 
         internal override byte[] GetBytes()
@@ -75,6 +137,9 @@ namespace RxMqtt.Shared.Messages
 
             if (Message != null)
                 size += Message.Length;
+
+            if (size > 1e+7)
+                throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7. ");
 
             using (var stream = new MemoryStream())
             {
