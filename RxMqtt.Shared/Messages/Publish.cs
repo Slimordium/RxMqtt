@@ -44,77 +44,56 @@ namespace RxMqtt.Shared.Messages
                 throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7 and cannot be null");
         }
 
+        private Tuple<int, int> GetPacketLength(IReadOnlyList<byte> buffer)
+        {
+            var multiplier = 1;
+            var value = 0;
+            var index = 0;
+            var encodedByte = 0x00;
+
+            do
+            {
+                encodedByte = buffer[index];
+                index++;
+
+                value += (encodedByte & 127) * multiplier;
+
+                multiplier *= 128;
+
+                if (multiplier > 128 * 128 * 128)
+                    break;
+
+            } while ((encodedByte & 128) != 0 && index < 5);
+
+            return new Tuple<int, int>(value, index);
+        }
+
         internal Publish(byte[] buffer)
         {
-            if (buffer.Length > 1e+7)
-                throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7 ");
-
             try
             {
                 var newBuffer = new List<byte>(buffer);
 
                 newBuffer = newBuffer.GetRange(1, newBuffer.Count - 1);
 
-                var publishMessageLength = 0;
-                var index = 0;
-                var bufferAfterGetRemaining = new List<byte>();
+                var len = GetPacketLength(newBuffer);
 
-                foreach (var @byte in newBuffer)
-                {
-                    index++;
+                var index = len.Item2;
 
-                    if (index == 1 && @byte < 0x7f)
-                    {
-                        publishMessageLength = Convert.ToUInt16(@byte);
-                        bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
-                        break;
-                    }
+                var asdf = newBuffer.Count - len.Item1;
 
-                    if (@byte > 0x7f)
-                    {
-                        publishMessageLength = publishMessageLength + Convert.ToUInt16(@byte);
-                    }
-                    else
-                    {
-                        publishMessageLength = publishMessageLength + @byte * 128;
-                        bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
-                        break;
-                    }
-                }
+                var bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
+
+                if (bufferAfterGetRemaining[0] == 0x00)
+                    bufferAfterGetRemaining = bufferAfterGetRemaining.GetRange(1, bufferAfterGetRemaining.Count - 1);
 
                 var topicLength = 0;
-                index = 0;
 
-                foreach (var @byte in bufferAfterGetRemaining)
-                {
-                    index++;
+                len = GetPacketLength(bufferAfterGetRemaining);
 
-                    if (index == 1 && @byte < 0x7f && @byte != 0x00)
-                    {
-                        topicLength = Convert.ToUInt16(@byte);
+                index = len.Item2;
 
-                        break;
-                    }
-
-                    if (index > 1 && @byte < 0x7f && @byte != 0x00)
-                    {
-                        topicLength = Convert.ToUInt16(@byte);
-
-                        break;
-                    }
-
-                    if (@byte > 0x7f)
-                    {
-                        publishMessageLength = publishMessageLength + Convert.ToUInt16(@byte);
-                    }
-
-                    if (@byte > 0x00 && @byte <= 0x74 && index > 1)
-                    {
-                        topicLength = publishMessageLength + @byte * 128;
-
-                        break;
-                    }
-                }
+                topicLength = len.Item1;
 
                 Topic = Encoding.UTF8.GetString(bufferAfterGetRemaining.GetRange(index, topicLength).ToArray());
 

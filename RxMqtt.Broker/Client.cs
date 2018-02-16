@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -19,14 +22,20 @@ namespace RxMqtt.Broker
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly IObservable<byte[]> _clientReceiveObservable;
-        private readonly IObservable<Publish> _brokerPublishObservable;
+        //private readonly IObservable<byte[]> _clientReceiveObservable;
+
+
+
+
 
         private readonly List<string> _subscriptions = new List<string>();
+
         private readonly ISubject<Publish> _brokerPublishSubject;
+
+
         private readonly ISubject<KeyValuePair<string, string>> _topicSubject;
 
-        private IDisposable _readDisposable;
+        private readonly IDisposable _readDisposable;
         private IDisposable _keepAliveDisposable;
 
         private readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
@@ -35,46 +44,31 @@ namespace RxMqtt.Broker
 
         private long _shouldCancel;
 
-        private readonly int _bufferLength;
 
-        internal Client(Socket socket, ISubject<Publish> brokerPublishSubject, ISubject<KeyValuePair<string, string>> topicSubject, CancellationToken cancellationToken)
+
+        internal Client(Socket socket, ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
         {
-            _bufferLength = Convert.ToInt32(1e+7);//10 MB
 
-            _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _cancellationTokenSource = cancellationTokenSource;
+
+            //_cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _socket = socket;
-            _topicSubject = topicSubject;
+            //_topicSubject = topicSubject;
 
             _brokerPublishSubject = brokerPublishSubject;
-            _brokerPublishObservable = _brokerPublishSubject.AsObservable();
+            //_brokerPublishInObservable = brokerPublishSubject.AsObservable().ObserveOn(Scheduler.Default);
 
-            _clientReceiveObservable = ReadSocket().ToObservable();
-        }
+            _readDisposable = ReadSocket().ToObservable().SubscribeOn(Scheduler.Default).Subscribe(OnNextIncomingPacket);
 
-        internal bool Start()
-        {
-            _readDisposable = _clientReceiveObservable.Subscribe(OnNextIncomingPacket); //Blocks
-
-            _logger.Log(LogLevel.Info, $"Disposing ReadSocket");
-
-            _readDisposable.Dispose();
-
-            _logger.Log(LogLevel.Info, $"Disposing {_subscriptionDisposables.Count} subscriptions");
-
-            foreach (var subscriptionDisposable in _subscriptionDisposables)
-            {
-                subscriptionDisposable.Dispose();
-            }
-
-            return true;
+          
         }
 
         private IEnumerable<byte[]> ReadSocket()
         {
-            while (!_cancellationTokenSource.Token.IsCancellationRequested)
+            while (true)
             {
                 byte[] packet = null;
-                var buffer = new byte[_bufferLength];
+                var buffer = new byte[200000];
 
                 try
                 {
@@ -86,15 +80,27 @@ namespace RxMqtt.Broker
                     packet = new byte[bytesIn];
 
                     Array.Copy(buffer, 0, packet, 0, bytesIn);
+
                 }
                 catch (Exception e)
                 {
                     _logger.Log(LogLevel.Info, e.Message);
+
+                    
                     break;
                 }
 
                 yield return packet;
             }
+
+            _readDisposable.Dispose();
+
+            foreach (var subscriptionDisposable in _subscriptionDisposables)
+            {
+                subscriptionDisposable.Dispose();
+            }
+
+            _cancellationTokenSource.Cancel();
         }
 
         private void OnNextPublish(Publish mqttMessage)
@@ -120,6 +126,7 @@ namespace RxMqtt.Broker
                     Send(new PublishAck(publishMsg.PacketId));
 
                     _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
+
                     break;
                 case MsgType.Connect:
                     var connectMsg = new Connect(buffer);
@@ -162,7 +169,7 @@ namespace RxMqtt.Broker
 
                     break;
                 default:
-                    _logger.Log(LogLevel.Warn, $"Ignoring message: '{Encoding.UTF8.GetString(buffer)}'");
+                    _logger.Log(LogLevel.Warn, $"Ignoring message");
                     break;
             }
 
@@ -178,16 +185,19 @@ namespace RxMqtt.Broker
 
                 _subscriptions.Add(topic);
 
-                _topicSubject.OnNext(new KeyValuePair<string, string>(_clientId, topic));
+                //_topicSubject.OnNext(new KeyValuePair<string, string>(_clientId, topic));
 
                 if (topic.EndsWith("#"))
                 {
                     var newtopic = topic.Replace("#", "");
-                    _subscriptionDisposables.Add(_brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).SubscribeOn(Scheduler.Default).Subscribe(OnNextPublish));
                 }
                 else
                 {
-                    _subscriptionDisposables.Add(_brokerPublishObservable.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => 
+                                m.MsgType == MsgType.Publish && 
+                                m.Topic.Equals(topic)
+                                ).SubscribeOn(Scheduler.Default).Subscribe(OnNextPublish));
                 }
                 
                 _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");

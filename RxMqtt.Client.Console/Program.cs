@@ -1,14 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using RxMqtt.Shared;
 
 namespace RxMqtt.Client.Console
 {
-
-#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
 
     class Program{
         private static MqttClient _mqttClient;
@@ -57,7 +50,7 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(line))
                         continue;
 
-                    _mqttClient.SubscribeAsync(new Subscription(Handler, line.Trim()));
+                    _mqttClient.Subscribe(Handler, line.Trim());
 
                     System.Console.WriteLine("subscribed");
                 }
@@ -77,36 +70,23 @@ namespace RxMqtt.Client.Console
                 if (string.IsNullOrEmpty(count))
                     count = "1";
 
-                Publish(msg, topic, count).ConfigureAwait(false);
+                Publish(msg, topic, count);//.ConfigureAwait(false);
 
                 System.Console.WriteLine("published");
             }
         }
 
-        private static async Task<bool> Publish(string msg, string topic, string count)
+        private static void Publish(string msg, string topic, string count)
         {
-            var tcs = new TaskCompletionSource<bool>();
-
-            Task.Run(async () =>
+            for (var i = 1; i <= Convert.ToInt32(count); i++)
             {
-                for (var i = 1; i <= Convert.ToInt32(count); i++)
-                {
-                    var result = await _mqttClient.PublishAsync(msg, topic);
-                }
-
-                tcs.SetResult(true);
-
-            });
-
-            return await tcs.Task;
+                _mqttClient.PublishAsync(msg, topic).Wait();
+            }
         }
 
-        private static Task Handler(string s)
+        private static void Handler(string s)
         {
-            return Task.Run((() =>
-            {
-                System.Console.WriteLine($"In => '{s}'");
-            }));
+            System.Console.WriteLine($"In => '{s}'");
         }
     }
 }

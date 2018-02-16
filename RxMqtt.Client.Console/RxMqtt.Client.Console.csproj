@@ -100,11 +100,11 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\RxMqtt.Client\RxMqtt.Client.csproj">
-      <Project>{a141a159-9e65-4dcb-95fd-210f0a3fdbee}</Project>
+      <Project>{8bebdacb-c996-408b-a191-baae0344f4c8}</Project>
       <Name>RxMqtt.Client</Name>
     </ProjectReference>
     <ProjectReference Include="..\RxMqtt.Shared\RxMqtt.Shared.csproj">
-      <Project>{fcb5d28a-96ad-400b-8d4f-65c21fdf487f}</Project>
+      <Project>{62a614e5-322d-4601-9f09-61966318f9ae}</Project>
       <Name>RxMqtt.Shared</Name>
     </ProjectReference>
   </ItemGroup>
