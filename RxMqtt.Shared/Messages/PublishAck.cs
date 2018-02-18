@@ -1,11 +1,15 @@
+using System;
+using System.Collections.Generic;
 using RxMqtt.Shared;
 using System.Runtime.CompilerServices;
+using NLog;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class PublishAck : MqttMessage
+    public class PublishAck : MqttMessage
     {
         internal PublishAck(ushort packetId)
         {
@@ -13,17 +17,22 @@ namespace RxMqtt.Shared.Messages
             MsgType = MsgType.PublishAck;
         }
 
+        internal PublishAck(byte[] buffer)
+        {
+            PacketId = BytesToUshort(new [] {buffer[2], buffer[3]});
+
+            Logger.Log(LogLevel.Debug, $"PublishAck {PacketId} - {BitConverter.ToString(buffer)}");
+
+            MsgType = MsgType.PublishAck;
+        }
+
         internal override byte[] GetBytes()
         {
-            var buffer = new byte[4];
+            var buffer = new List<byte> {((byte) MsgType.PublishAck << (byte) MsgOffset.Type) | 0x00, 0x02};
 
-            buffer[0] = ((byte)MsgType.PublishAck << (byte)MsgOffset.Type) | 0x00;//PublishAck
-            buffer[1] = 0x02;
-            var bytes = UshortToBytes(PacketId);
-            buffer[2] = bytes[0];
-            buffer[3] = bytes[1];
+            buffer.AddRange(UshortToBytes(PacketId));
 
-            return buffer;
+            return buffer.ToArray();
         }
     }
 }

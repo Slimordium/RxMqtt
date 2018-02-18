@@ -1,8 +1,13 @@
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using NLog;
 using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
+[assembly: InternalsVisibleTo("RxMqtt.Tests")]
+[assembly: InternalsVisibleTo("RsMqtt.Broker.Console")]
 
 namespace RxMqtt.Shared.Messages
 {
@@ -13,7 +18,7 @@ namespace RxMqtt.Shared.Messages
     public abstract class MqttMessage{
         internal static ILogger Logger { get; } = LogManager.GetCurrentClassLogger();
 
-        protected QosLevel QosLevel { get; set;  } = QosLevel.AtLeastOnce;
+        protected QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
 
         internal bool IsDuplicate { get; set; } = false;
 
@@ -51,8 +56,7 @@ namespace RxMqtt.Shared.Messages
             {
                 fixedHeaderSize++;
                 temp = temp / 128;
-            }
-            while 
+            } while
             (
                 temp > 0
             );
@@ -64,45 +68,23 @@ namespace RxMqtt.Shared.Messages
         {
             var bytes = new byte[2];
 
-            bytes[0] = (byte)((value >> 8) & 0x00FF);
-            bytes[1] = (byte)(value & 0x00FF);
+            bytes[0] = (byte) ((value >> 8) & 0x00FF);
+            bytes[1] = (byte) (value & 0x00FF);
 
             return bytes;
         }
 
         internal static byte[] UshortToBytes(int value)
         {
-            return UshortToBytes((ushort)value);
+            return UshortToBytes((ushort) value);
         }
 
         internal static ushort BytesToUshort(byte[] bytes)
         {
-            var returnValue = (ushort)((bytes[0] << 8) & 0xFF00);
+            var returnValue = (ushort) ((bytes[0] << 8) & 0xFF00);
             returnValue |= bytes[1];
 
             return returnValue;
-        }
-
-        //Annoying...
-        internal static ushort ToUshort(byte[] buffer)
-        {
-            var multiplier = 1;
-            var value = 0;
-
-            foreach (var b in buffer)
-            {
-                var digit = 0;
-                do
-                {
-                    digit = b;
-                    value += ((digit & 127) * multiplier);
-                    multiplier *= 128;
-                }
-                while
-                ((digit & 128) != 0);
-            }
-
-            return (ushort)value;
         }
 
         //Annoying...
@@ -117,14 +99,73 @@ namespace RxMqtt.Shared.Messages
                 if (remainingLength > 0)
                     digit = digit | 0x80;
 
-                buffer[index++] = (byte)digit;
-            }
-            while 
+                buffer[index++] = (byte) digit;
+            } while
             (
                 remainingLength > 0
             );
 
             return index;
+        }
+
+        internal static Tuple<int, int> DecodeValue(IReadOnlyList<byte> buffer, int startIndex = 0)
+        {
+            var multiplier = 1;
+            var decodedValue = 0;
+            var encodedByte = 0x00;
+            var bytesUsedToStoreValue = startIndex;
+
+            do
+            {
+                encodedByte = buffer[bytesUsedToStoreValue];
+                bytesUsedToStoreValue++;
+
+                decodedValue += (encodedByte & 127) * multiplier;
+
+                multiplier *= 128;
+
+                if (multiplier > 128 * 128 * 128)
+                    break;
+
+            } while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
+
+            return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);
+        }
+
+        internal static byte[] EncodeValue(int value)
+        {
+            return EncodeValue(Convert.ToUInt32(value));
+        }
+
+        internal static byte[] EncodeValue(uint value)
+        {
+            var buffer = new byte[4];
+            var index = 0;
+
+            do
+            {
+                var encodedByte = value % 128;
+
+                value /= 128;
+
+                if (value > 0)
+                    encodedByte = encodedByte | 128;
+
+                buffer[index] = (byte)encodedByte;
+
+                index++;
+            } while
+            (
+                value > 0
+            );
+
+            var indexOf = Array.FindIndex(buffer, b => b == 0x00);
+
+            var newBuffer = new byte[indexOf];
+
+            Array.Copy(buffer, 0, newBuffer, 0, indexOf);
+
+            return newBuffer;
         }
     }
 }

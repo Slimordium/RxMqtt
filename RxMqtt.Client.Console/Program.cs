@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading.Tasks;
 
 namespace RxMqtt.Client.Console
 {
@@ -70,17 +71,28 @@ namespace RxMqtt.Client.Console
                 if (string.IsNullOrEmpty(count))
                     count = "1";
 
-                Publish(msg, topic, count);//.ConfigureAwait(false);
+                Publish(msg, topic, count).Wait();//.ConfigureAwait(false);
+                
+                
 
                 System.Console.WriteLine("published");
             }
         }
 
-        private static void Publish(string msg, string topic, string count)
+        private static async Task Publish(string msg, string topic, string count)
         {
             for (var i = 1; i <= Convert.ToInt32(count); i++)
             {
-                _mqttClient.PublishAsync(msg, topic).Wait();
+                try
+                {
+                    var r = await _mqttClient.PublishAsync(msg, topic);
+                    System.Console.WriteLine($"Done {r}");
+                }
+                catch (Exception e)
+                {
+                    System.Console.WriteLine(e.Message);
+                }
+                
             }
         }
 

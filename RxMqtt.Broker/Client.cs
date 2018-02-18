@@ -18,118 +18,166 @@ namespace RxMqtt.Broker
     {
         private string _clientId;
 
-        private readonly Socket _socket;
+        private Socket _socket;
 
-        private ILogger _logger = LogManager.GetCurrentClassLogger();
-
-        //private readonly IObservable<byte[]> _clientReceiveObservable;
-
-
-
-
+        private static ILogger _logger = LogManager.GetCurrentClassLogger();
 
         private readonly List<string> _subscriptions = new List<string>();
 
-        private readonly ISubject<Publish> _brokerPublishSubject;
+        private ISubject<Publish> _brokerPublishSubject;
 
-
-        private readonly ISubject<KeyValuePair<string, string>> _topicSubject;
-
-        private readonly IDisposable _readDisposable;
         private IDisposable _keepAliveDisposable;
 
         private readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
 
-        private readonly CancellationTokenSource _cancellationTokenSource;
+        private CancellationTokenSource _cancellationTokenSource;
 
         private long _shouldCancel;
 
-
-
-        internal Client(Socket socket, ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
+        internal  Client(Socket socket, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
         {
-
             _cancellationTokenSource = cancellationTokenSource;
-
-            //_cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _socket = socket;
-            //_topicSubject = topicSubject;
-
             _brokerPublishSubject = brokerPublishSubject;
-            //_brokerPublishInObservable = brokerPublishSubject.AsObservable().ObserveOn(Scheduler.Default);
 
-            _readDisposable = ReadSocket().ToObservable().SubscribeOn(Scheduler.Default).Subscribe(OnNextIncomingPacket);
+            //_task = Task.Factory.StartNew(Read, TaskCreationOptions.LongRunning);
 
-          
+            BeginReceive();
         }
 
-        private IEnumerable<byte[]> ReadSocket()
-        {
-            while (true)
-            {
-                byte[] packet = null;
-                var buffer = new byte[200000];
-
-                try
-                {
-                    var bytesIn = _socket.Receive(buffer, SocketFlags.None);
-
-                    if (bytesIn == 0)
-                        continue;
-
-                    packet = new byte[bytesIn];
-
-                    Array.Copy(buffer, 0, packet, 0, bytesIn);
-
-                }
-                catch (Exception e)
-                {
-                    _logger.Log(LogLevel.Info, e.Message);
-
-                    
-                    break;
-                }
-
-                yield return packet;
-            }
-
-            _readDisposable.Dispose();
-
-            foreach (var subscriptionDisposable in _subscriptionDisposables)
-            {
-                subscriptionDisposable.Dispose();
-            }
-
-            _cancellationTokenSource.Cancel();
-        }
+        private Task _task;
 
         private void OnNextPublish(Publish mqttMessage)
         {
             //This sends the message to the client attached to this socket
-            Send(mqttMessage);
+            BeginSend(mqttMessage);
         }
 
-        private void OnNextIncomingPacket(byte[] buffer)
-        {
-            if (buffer.Length <= 1)
-                return;
+        class ReceiveState{
+            public Socket Socket { get; set; }
+            public byte[] Buffer { get; set; } = new byte[300000];
 
-            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+            public Action<byte[]> Callback { get; set; }
+        }
+
+        private void BeginReceive()
+        {
+            var rs = new ReceiveState {Socket = _socket, Callback = ProcessRead};
+
+            try
+            {
+                var ar = _socket.BeginReceive(rs.Buffer, 0, rs.Buffer.Length, SocketFlags.None, EndReceive, rs);
+                ar.AsyncWaitHandle.WaitOne();
+            }
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Trace, e.Message);
+            }
+        }
+
+        private static void EndReceive(IAsyncResult asyncResult)
+        {
+            try
+            {
+                var ar = (ReceiveState)asyncResult.AsyncState;
+
+                var bytesIn = ar.Socket.EndReceive(asyncResult);
+
+                var newBuffer = new byte[bytesIn];
+
+                Array.Copy(ar.Buffer, newBuffer, bytesIn);
+
+                ar.Callback.Invoke(newBuffer);
+            }
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Trace, e.Message);
+            }
+        }
+
+        internal static Tuple<int, int> DecodeValue(IReadOnlyList<byte> buffer, int startIndex = 0)
+        {
+            var multiplier = 1;
+            var decodedValue = 0;
+            var encodedByte = 0x00;
+            var bytesUsedToStoreValue = startIndex;
+
+            do
+            {
+                encodedByte = buffer[bytesUsedToStoreValue];
+                bytesUsedToStoreValue++;
+
+                decodedValue += (encodedByte & 127) * multiplier;
+
+                multiplier *= 128;
+
+                if (multiplier > 128 * 128 * 128)
+                    break;
+
+            } while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
+
+            return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);
+        }
+
+        private List<List<byte>> SplitInBuffer(byte[] inBuffer)
+        {
+            var buffer = new List<byte>(inBuffer);
+            var returnBuffers = new List<List<byte>>();
+
+            var startIndex = 0;
+
+            var packetLength = DecodeValue(buffer, 1).Item1 + 2;
+
+            if (buffer.Count > packetLength)
+            {
+                //var msgType = (MsgType)(byte)((inBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+                //_logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
+
+
+                while (startIndex < buffer.Count)
+                {
+                    returnBuffers.Add(buffer.GetRange(startIndex, packetLength));
+
+                    startIndex += packetLength;
+                }
+            }
+            else
+            {
+                returnBuffers.Add(buffer);
+            }
+
+            return returnBuffers;
+        }
+
+        private void ProcessRead(byte[] inBuffer)
+        {
+            //SplitInBuffer(inBuffer);
+
+
+            var msgType = (MsgType)(byte)((inBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
             _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
+
+            var packetLength = DecodeValue(inBuffer, 1).Item1 + 2;
+
+            _logger.Log(LogLevel.Info, $"Decoded packet length => {packetLength}");
+
+            var buffer = new byte[packetLength];
+
+            Array.Copy(inBuffer, buffer, packetLength);
 
             switch (msgType)
             {
                 case MsgType.Publish:
-                    var publishMsg = new Publish(buffer);
+                    var publishMsg = new Publish(inBuffer);
 
-                    Send(new PublishAck(publishMsg.PacketId));
+                    BeginSend(new PublishAck(publishMsg.PacketId));
 
                     _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
 
                     break;
                 case MsgType.Connect:
-                    var connectMsg = new Connect(buffer);
+                    var connectMsg = new Connect(inBuffer);
 
                     _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
@@ -148,17 +196,17 @@ namespace RxMqtt.Broker
 
                     _logger = LogManager.GetLogger(_clientId);
 
-                    Send(new ConnectAck());
+                    BeginSend(new ConnectAck());
                     break;
                 case MsgType.PingRequest:
-                    
 
-                    Send(new PingResponse());
+
+                    BeginSend(new PingResponse());
                     break;
                 case MsgType.Subscribe:
-                    var subscribeMsg = new Subscribe(buffer);
+                    var subscribeMsg = new Subscribe(inBuffer);
 
-                    Send(new SubscribeAck(subscribeMsg.PacketId));
+                    BeginSend(new SubscribeAck(subscribeMsg.PacketId));
 
                     Subscribe(subscribeMsg.Topics);
                     break;
@@ -174,6 +222,8 @@ namespace RxMqtt.Broker
             }
 
             Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
+
+            BeginReceive();
         }
 
         private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic
@@ -190,22 +240,28 @@ namespace RxMqtt.Broker
                 if (topic.EndsWith("#"))
                 {
                     var newtopic = topic.Replace("#", "");
-                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).SubscribeOn(Scheduler.Default).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.SubscribeOn(Scheduler.Default).Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish));
                 }
                 else
                 {
-                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => 
-                                m.MsgType == MsgType.Publish && 
-                                m.Topic.Equals(topic)
-                                ).SubscribeOn(Scheduler.Default).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject
+                                .ObserveOn(Scheduler.Default)
+                                .Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic))
+                                .Subscribe(OnNextPublish));
                 }
                 
                 _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
             }
         }
 
-        private void Send(MqttMessage message)
+        class SendState{
+            
+            public Socket Socket { get; set; }
+        }
+
+        private void BeginSend(MqttMessage message)
         {
+
             _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}'");
 
             try
@@ -213,12 +269,25 @@ namespace RxMqtt.Broker
                 if (!_socket.Connected)
                     return;
 
-                _socket.Send(message.GetBytes());
+                var buffer = message.GetBytes();
+
+                var ar = _socket.BeginSend(buffer, 0, buffer.Length, SocketFlags.None, EndSend, new SendState {Socket = _socket});
+
+                ar.AsyncWaitHandle.WaitOne();
+
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, $"Send => '{e.Message}'");
+                _logger.Log(LogLevel.Error, $"BeginSend => '{e.Message}'");
             }
+        }
+
+        private static void EndSend(IAsyncResult asyncResult)
+        {
+            var state = (SendState) asyncResult.AsyncState;
+
+            state.Socket.EndSend(asyncResult);
+            asyncResult.AsyncWaitHandle.WaitOne();
         }
     }
 }

@@ -44,30 +44,6 @@ namespace RxMqtt.Shared.Messages
                 throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7 and cannot be null");
         }
 
-        private Tuple<int, int> GetPacketLength(IReadOnlyList<byte> buffer)
-        {
-            var multiplier = 1;
-            var value = 0;
-            var index = 0;
-            var encodedByte = 0x00;
-
-            do
-            {
-                encodedByte = buffer[index];
-                index++;
-
-                value += (encodedByte & 127) * multiplier;
-
-                multiplier *= 128;
-
-                if (multiplier > 128 * 128 * 128)
-                    break;
-
-            } while ((encodedByte & 128) != 0 && index < 5);
-
-            return new Tuple<int, int>(value, index);
-        }
-
         internal Publish(byte[] buffer)
         {
             try
@@ -76,11 +52,9 @@ namespace RxMqtt.Shared.Messages
 
                 newBuffer = newBuffer.GetRange(1, newBuffer.Count - 1);
 
-                var len = GetPacketLength(newBuffer);
+                var len = DecodeValue(newBuffer);
 
                 var index = len.Item2;
-
-                var asdf = newBuffer.Count - len.Item1;
 
                 var bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
 
@@ -89,7 +63,7 @@ namespace RxMqtt.Shared.Messages
 
                 var topicLength = 0;
 
-                len = GetPacketLength(bufferAfterGetRemaining);
+                len = DecodeValue(bufferAfterGetRemaining);
 
                 index = len.Item2;
 
@@ -99,7 +73,7 @@ namespace RxMqtt.Shared.Messages
 
                 var bufferAfterGetTopic = bufferAfterGetRemaining.GetRange(index + topicLength, bufferAfterGetRemaining.Count - (index + topicLength));
 
-                PacketId = Convert.ToUInt16(bufferAfterGetTopic[0] + bufferAfterGetTopic[1]);
+                PacketId = BytesToUshort(new[] {bufferAfterGetTopic[0], bufferAfterGetTopic[1]});
 
                 Message = bufferAfterGetTopic.GetRange(2, bufferAfterGetTopic.Count - 2).ToArray();
             }
@@ -120,48 +94,29 @@ namespace RxMqtt.Shared.Messages
             if (size > 1e+7)
                 throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7. ");
 
-            using (var stream = new MemoryStream())
-            {
-                using (var binaryWriter = new BinaryWriter(stream))
-                {
-                    stream.Capacity = size;
+            var packet = new List<byte>();
+            var dupRetainFlags = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
 
-                    var dupRetainFlags = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
-                    dupRetainFlags |= IsDuplicate ? (byte)(1 << DupFlagOffset) : (byte)0x00;
-                    dupRetainFlags |= Retain ? (byte)(1 << RetainFlagOffset) : (byte)0x00;
+            dupRetainFlags |= IsDuplicate ? (byte)(1 << DupFlagOffset) : (byte)0x00;
+            dupRetainFlags |= Retain ? (byte)(1 << RetainFlagOffset) : (byte)0x00;
 
-                    binaryWriter.Write(dupRetainFlags);
+            packet.Add(dupRetainFlags);
 
-                    do
-                    {
-                        var digit = size % 128;
+            var sizeEnc = EncodeValue(size);
 
-                        size /= 128;
+            packet.AddRange(sizeEnc);
 
-                        if (size > 0)
-                            digit = digit | 0x80;
+            if (sizeEnc.Length == 1)
+                packet.Add(0x00);
 
-                        binaryWriter.Write((byte)digit);
-                    }
-                    while
-                    (
-                        size > 0
-                    );
+            packet.AddRange(EncodeValue(topicBytes.Length));
+            packet.AddRange(topicBytes);
+            packet.AddRange(UshortToBytes(PacketId));
 
-                    binaryWriter.Write(UshortToBytes(topicBytes.Length));
-                    binaryWriter.Write(topicBytes);
-                    binaryWriter.Write(UshortToBytes(PacketId));
+            if (Message != null)
+                packet.AddRange(Message);
 
-                    if (Message != null)
-                        binaryWriter.Write(Message);
-
-                    binaryWriter.Flush();
-
-                    var bytes = stream.ToArray();
-
-                    return bytes;
-                }
-            }
+            return packet.ToArray();
         }
     }
 }

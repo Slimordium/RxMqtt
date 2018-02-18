@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -9,42 +10,41 @@ using System.Reactive.Subjects;
 using System.Reflection;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading;
 using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
-namespace RxMqtt.Client
-{
-    internal class TcpConnection
-    {
-        private static Status _status = Status.Error;
+namespace RxMqtt.Client{
+    internal class TcpConnection{
+        private Status _status = Status.Error;
         private readonly int _port;
 
-        protected ISubject<Tuple<MsgType, int>> _ackSubject = new BehaviorSubject<Tuple<MsgType, int>>(null);
+        internal ISubject<PacketEnvelope> PacketSyncSubject { get; }
 
-        protected ISubject<Publish> _publishSubject = new BehaviorSubject<Publish>(null);
+        protected ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
 
         protected static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
+        private static readonly ManualResetEventSlim _readEvent = new ManualResetEventSlim(true);
+        private static readonly ManualResetEventSlim _writeEvent = new ManualResetEventSlim(true);
+
+        private Task _readTask;
+
         protected string HostName;
 
-        public IObservable<Publish> PublishObservable { get; set; }
-
-        public IObservable<Tuple<MsgType, int>> AckObservable { get; set; }
-
         internal TcpConnection
-            (
-                string connectionId,
-                string hostName,
-                int keepAliveInSeconds,
-                int port,
-                string certFileName = "",
-                string pfxPw = ""
-            )
+        (
+            string connectionId,
+            string hostName,
+            int keepAliveInSeconds,
+            int port,
+            string certFileName = "",
+            string pfxPw = ""
+        )
         {
-            AckObservable = _ackSubject.AsObservable();
-            PublishObservable = _publishSubject.AsObservable();
+            PacketSyncSubject = Subject.Synchronize(_packetSyncSubject);
 
             _keepAliveInSeconds = (ushort) keepAliveInSeconds;
             _connectionId = connectionId;
@@ -87,12 +87,12 @@ namespace RxMqtt.Client
 
                 if (_status == Status.Initialized)
                 {
-                    _task = Task.Factory.StartNew(BeginRead, TaskCreationOptions.LongRunning);
+                    _readTask = Task.Factory.StartNew(BeginRead, TaskCreationOptions.LongRunning);
                 }
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error,e);
+                _logger.Log(LogLevel.Error, e);
 
                 _status = Status.Error;
             }
@@ -100,7 +100,7 @@ namespace RxMqtt.Client
             return _status;
         }
 
-        internal void Write(MqttMessage message)
+        internal void BeginWrite(MqttMessage message)
         {
             if (message == null)
                 return;
@@ -109,6 +109,9 @@ namespace RxMqtt.Client
             {
                 return;
             }
+
+            _writeEvent.Wait();
+            _writeEvent.Reset();
 
             _logger.Log(LogLevel.Trace, $"Out => {message.MsgType}");
 
@@ -122,16 +125,18 @@ namespace RxMqtt.Client
                     return;
                 }
 
-                var asyncResult = _stream.BeginWrite(buffer, 0, buffer.Length, EndWrite, _stream);
+                var socketState = new StreamState();
 
-                asyncResult.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(_keepAliveInSeconds + 2));
+
+                var asyncResult = _stream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
+
+                asyncResult.AsyncWaitHandle.WaitOne();
             }
             catch (ObjectDisposedException)
             {
             }
             catch (Exception)
             {
-                
             }
         }
 
@@ -139,12 +144,19 @@ namespace RxMqtt.Client
         {
             try
             {
-                var ar = (Stream) asyncResult.AsyncState;
-                ar.EndWrite(asyncResult);
+                var ar = (StreamState) asyncResult.AsyncState;
+                _stream.EndWrite(asyncResult);
+
+                asyncResult.AsyncWaitHandle.WaitOne();
+
+
+                ar.Dispose();
+
+                _writeEvent.Set();
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error,e);
+                _logger.Log(LogLevel.Error, e);
             }
         }
 
@@ -157,8 +169,7 @@ namespace RxMqtt.Client
                 _socket = new Socket(_ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
                 {
                     UseOnlyOverlappedIO = true,
-                    ReceiveBufferSize = 500000,
-                    SendBufferSize = 500000,
+                    Blocking = true
                 };
 
                 await _socket.ConnectAsync(new IPEndPoint(_ipAddress, port));
@@ -201,13 +212,16 @@ namespace RxMqtt.Client
 
         private void BeginRead()
         {
+            _readEvent.Wait();
+            _readEvent.Reset();
+
             try
             {
-                var rs = new ReadState {Stream = _stream};
+                var socketState = new StreamState {CallBack = ProcessRead};
 
-                var ar = _stream.BeginRead(rs.Buffer, 0, rs.Buffer.Length, EndRead, rs);
+                var asyncResult = _stream.BeginRead(socketState.Buffer, 0, socketState.Buffer.Length, EndRead, socketState);
 
-                ar.AsyncWaitHandle.WaitOne();
+                asyncResult.AsyncWaitHandle.WaitOne();
             }
             catch (ObjectDisposedException)
             {
@@ -218,48 +232,119 @@ namespace RxMqtt.Client
             }
         }
 
-        protected void ProcessRead(byte[] buffer)
+        internal static Tuple<int, int> DecodeValue(IReadOnlyList<byte> buffer, int startIndex = 0)
         {
-            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+            var multiplier = 1;
+            var decodedValue = 0;
+            var encodedByte = 0x00;
+            var bytesUsedToStoreValue = startIndex;
 
-            _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
-
-            switch (msgType)
+            do
             {
-                case MsgType.Publish:
-                    var msg = new Publish(buffer);
-                    _publishSubject.OnNext(msg);
+                encodedByte = buffer[bytesUsedToStoreValue];
+                bytesUsedToStoreValue++;
 
-                    Write(new PublishAck(msg.PacketId));
-                    break;
-                case MsgType.ConnectAck:
-                    _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, 0));
-                    break;
-                case MsgType.PingResponse:
-                    break;
-                default:
-                    var msgId = MqttMessage.BytesToUshort(new[] { buffer[2], buffer[3] });
+                decodedValue += (encodedByte & 127) * multiplier;
 
-                    _ackSubject.OnNext(new Tuple<MsgType, int>(msgType, msgId));
+                multiplier *= 128;
+
+                if (multiplier > 128 * 128 * 128)
                     break;
+            } while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
+
+            return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);
+        }
+
+        private IEnumerable<List<byte>> SplitInBuffer(byte[] inBuffer)
+        {
+            var buffer = new List<byte>(inBuffer);
+
+            var startIndex = 0;
+
+            var packetLength = DecodeValue(buffer, startIndex + 1).Item1 + 2;
+
+            if (buffer.Count > packetLength)
+            {
+                while (startIndex < buffer.Count)
+                {
+                    packetLength = DecodeValue(buffer, startIndex + 1).Item1 + 2;
+
+                    if (startIndex + packetLength > buffer.Count)
+                        break;
+
+                    yield return buffer.GetRange(startIndex, packetLength);
+
+                    startIndex += packetLength;
+                }
+            }
+            else
+            {
+                yield return buffer;
             }
         }
 
-        private void EndRead(IAsyncResult asyncResult)
+        protected void ProcessRead(byte[] inBuffer)
+        {
+            foreach (var buffer in SplitInBuffer(inBuffer))
+            {
+                var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
+
+                _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
+
+                switch (msgType)
+                {
+                    case MsgType.Publish:
+                        var msg = new Publish(buffer.ToArray());
+                        PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg});
+
+                        BeginWrite(new PublishAck(msg.PacketId));
+                        break;
+                    case MsgType.ConnectAck:
+                        PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.ConnectAck});
+                        break;
+                    case MsgType.PingResponse:
+                        break;
+                    case MsgType.PublishAck:
+
+                        var pubAck = new PublishAck(buffer.ToArray());
+
+                        PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck});
+                        break;
+                    default:
+                        //var msgId = MqttMessage.BytesToUshort(new[] { buffer[2], buffer[3] });
+
+                        //_ackSubject.OnNext(new Tuple<MsgType, int>(msgType, msgId));
+                        break;
+                }
+            }
+
+            _readEvent.Set();
+
+            BeginRead();
+        }
+
+        private static void EndRead(IAsyncResult asyncResult)
         {
             try
             {
-                var stream = (ReadState)asyncResult.AsyncState;
+                byte[] newBuffer = null;
 
-                var bytesIn = stream.Stream.EndRead(asyncResult);
+                var asyncState = (StreamState) asyncResult.AsyncState;
+
+                asyncResult.AsyncWaitHandle.WaitOne();
+
+                var bytesIn = _stream.EndRead(asyncResult);
 
                 if (bytesIn > 0)
                 {
-                    var newBuffer = new byte[bytesIn];
-                    Array.Copy(stream.Buffer, newBuffer, bytesIn);
+                    newBuffer = new byte[bytesIn];
 
-                    ProcessRead(newBuffer);
+                    Array.Copy(asyncState.Buffer, newBuffer, bytesIn);
                 }
+
+                asyncState.CallBack.Invoke(newBuffer);
+
+                asyncState.Dispose();
             }
             catch (ObjectDisposedException)
             {
@@ -271,35 +356,62 @@ namespace RxMqtt.Client
 
                 Task.Delay(1000).Wait();
             }
-
-            BeginRead();
         }
-
 
         #region PrivateFields
 
-        private Socket _socket;
+        private static Socket _socket;
         private static Stream _stream;
-        private Task _task;
         private readonly string _pfxFileName;
         private readonly string _certPassword;
-        private readonly string _connectionId;
 
         private IPAddress _ipAddress;
         private X509Certificate2 _certificate;
         private X509CertificateCollection _x509CertificateCollection;
         private ushort _keepAliveInSeconds;
+        private string _connectionId;
 
         #endregion
     }
 
-    internal class ReadState
-    {
+    internal class PacketEnvelope{
+        public MsgType MsgType { get; set; }
 
-        public byte[] Buffer { get; set; } = new byte[500000];
+        public MqttMessage Message { get; set; }
 
-        public Stream Stream { get; set; }
+        public int PacketId { get; set; }
+    }
+
+    internal class StreamState : IDisposable{
+        public byte[] Buffer { get; set; } = new byte[300000];
 
         public int BytesIn { get; set; }
+
+        public Action<byte[]> CallBack { get; set; }
+
+        ~StreamState()
+        {
+            Dispose(false);
+        }
+
+        private void ReleaseUnmanagedResources()
+        {
+            Buffer = null;
+            CallBack = null;
+        }
+
+        private void Dispose(bool disposing)
+        {
+            ReleaseUnmanagedResources();
+            if (disposing)
+            {
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
     }
 }

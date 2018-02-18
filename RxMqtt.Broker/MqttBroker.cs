@@ -2,11 +2,8 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
-using System.Reactive.Concurrency;
-using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
-using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared.Messages;
 
@@ -22,8 +19,9 @@ namespace RxMqtt.Broker
 
         private readonly ISubject<Publish> _publishSubject = new Subject<Publish>(); //Everyone pushes to this
 
+        readonly List<CancellationTokenSource> _cancellationTokenSources = new List<CancellationTokenSource>();
 
-        private readonly ISubject<KeyValuePair<string, string>> _topicSubject = new Subject<KeyValuePair<string, string>>();
+        readonly Dictionary<Guid, Client> _clients = new Dictionary<Guid, Client>();
 
         private readonly int _port = 1883;
 
@@ -32,10 +30,6 @@ namespace RxMqtt.Broker
         private bool _started;
 
         private CancellationToken _cancellationToken;
-
-        private readonly List<KeyValuePair<string, string>> _availableTopics = new List<KeyValuePair<string, string>>();
-
-        private IDisposable _topicDisposable;
 
         public MqttBroker()
         {
@@ -73,11 +67,6 @@ namespace RxMqtt.Broker
 
             _started = true;
 
-            _topicDisposable = _topicSubject.Subscribe(topic =>
-            {
-                _availableTopics.Add(topic);
-            });
-
             _cancellationToken = cancellationToken;
 
             _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}:{_port}'");
@@ -102,30 +91,19 @@ namespace RxMqtt.Broker
                     throw;
                 }
             }
-
-            
         }
 
         private void AcceptConnectionCallback(IAsyncResult asyncResult)
         {
-
             _logger.Log(LogLevel.Trace, $"Client connecting...");
 
             var listener = (Socket)asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
             socket.UseOnlyOverlappedIO = true;
+            socket.Blocking = true;
 
-            socket.ReceiveBufferSize = 200000;
-            socket.SendBufferSize = 200000;
-
-            //_clients.Add(Task.Factory.StartNew(() =>
-            //    {
-            //        var client = new Client(socket, _publishSubject, _cancellationToken);
-            //        var completed = client.Start();
-            //        _logger.Log(LogLevel.Trace, "Client task completed");
-            //    }
-            //    , TaskCreationOptions.LongRunning));
+            
             var cuid = Guid.NewGuid();
             var cts = new CancellationTokenSource();
             cts.Token.Register(() =>
@@ -135,21 +113,11 @@ namespace RxMqtt.Broker
 
             _cancellationTokenSources.Add(cts);
 
-            _clients.Add(cuid, new Client(socket, _publishSyncSubject, ref cts));
-            //        var completed = client.Start();
-            //        _logger.Log(LogLevel.Trace, "Client task completed");
-
-
+            _clients.Add(cuid, new Client(socket, ref _publishSyncSubject, ref cts));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 
             _acceptConnectionResetEvent.Set();
         }
-
-        readonly List<CancellationTokenSource> _cancellationTokenSources = new List<CancellationTokenSource>();
-
-        readonly Dictionary<Guid, Client> _clients = new Dictionary<Guid, Client>() ;
-
-
     }
 }

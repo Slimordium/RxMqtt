@@ -42,20 +42,20 @@ namespace RxMqtt.Shared.Messages
         {
             MsgType = MsgType.Subscribe;
 
-            var packetLength = ToUshort(new [] { buffer[1], buffer[2] });
+            var packetLength = DecodeValue(buffer, 1);
 
-            PacketId = ToUshort(new[] {buffer[3], buffer[4]});
+            PacketId = (ushort)DecodeValue(new[] {buffer[3], buffer[4]}).Item1;
 
             var topics = new List<string>();
 
             var topicLengthIndex = 5;//First topic length is at this index
             var combinedTopicLengths = 0;
 
-            while(true)
+            while (true)
             {
                 try
                 {
-                    var topicLength = ToUshort(new[] { buffer[topicLengthIndex] });
+                    var topicLength = DecodeValue(buffer, topicLengthIndex).Item1;
 
                     combinedTopicLengths += topicLength;
 
@@ -65,7 +65,7 @@ namespace RxMqtt.Shared.Messages
 
                     topics.Add(Encoding.UTF8.GetString(topicBuffer));
 
-                    if (packetLength - combinedTopicLengths <= topics.Count * 3 + 5)
+                    if (packetLength.Item1 - combinedTopicLengths <= topics.Count * 3 + 5)
                         break;
 
                     topicLengthIndex += topicLength + 3;

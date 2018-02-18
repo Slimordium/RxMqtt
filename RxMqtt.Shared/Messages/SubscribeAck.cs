@@ -1,4 +1,6 @@
 
+using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
@@ -13,17 +15,24 @@ namespace RxMqtt.Shared.Messages
             PacketId = packetId;
         }
 
+        public SubscribeAck(byte[] buffer)
+        {
+            MsgType = MsgType.SubscribeAck;
+
+            PacketId = BitConverter.ToUInt16(buffer, 2);
+        }
+
         internal override byte[] GetBytes()
         {
-            var buffer = new byte[4];
+            var buffer = new List<byte> {((byte) MsgType.SubscribeAck << (byte) MsgOffset.Type) | 0x00};
 
-            buffer[0] = ((byte)MsgType.SubscribeAck << (byte)MsgOffset.Type) | 0x00;
-            buffer[1] = 0x02;
-            var bytes = UshortToBytes(PacketId);
-            buffer[2] = bytes[0];
-            buffer[3] = bytes[1];
+            var encodeValue = EncodeValue(PacketId);
 
-            return buffer;
+            buffer.Add((byte)encodeValue.Length); //Remaining length
+
+            buffer.AddRange(encodeValue);
+
+            return buffer.ToArray();
         }
     }
 }

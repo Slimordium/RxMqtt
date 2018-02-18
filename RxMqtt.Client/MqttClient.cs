@@ -79,7 +79,7 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"KeepAliveSeconds => {_keepAliveInSeconds}");
 
-            _connection.Write(new Connect(_connectionId, _keepAliveInSeconds));
+            _connection.BeginWrite(new Connect(_connectionId, _keepAliveInSeconds));
 
             _keepAliveTimer = new Timer(Ping);
             
@@ -88,32 +88,64 @@ namespace RxMqtt.Client
             return _status;
         }
 
-        public Task PublishAsync(string message, string topic)
+        public async Task<PublishAck> PublishAsync(string message, string topic)
         {
             var messageToPublish = new Publish
             {
                 Topic = topic,
                 Message = Encoding.UTF8.GetBytes(message)
             };
-            _connection.Write(messageToPublish);
+            _connection.BeginWrite(messageToPublish);
 
-            return _connection.AckObservable.Where(tuple => tuple.Item1 == MsgType.PublishAck).FirstAsync().ToTask();
+            var packetEnvelope = await _connection.PacketSyncSubject
+                                .SkipWhile(envelope =>
+                                {
+                                    if (envelope.MsgType != MsgType.PublishAck)
+                                        return true;
+
+                                    if (envelope.PacketId != messageToPublish.PacketId)
+                                        return true;
+
+                                    Console.WriteLine($"Publish - {messageToPublish.PacketId}");
+
+                                    Console.WriteLine($"{envelope.MsgType} - {envelope.PacketId}");
+
+                                    return false;
+                                })
+                                .Take(1);
+
+            return (PublishAck)packetEnvelope.Message;
         }
 
         public void Subscribe(Action<string> callback, string topic)
         {
-            _disposables.Add(topic, _connection.PublishObservable.Where(publish => publish != null && publish.Topic.Equals(topic, StringComparison.InvariantCultureIgnoreCase)).Subscribe(publish => { callback.Invoke(Encoding.UTF8.GetString(publish.Message)); }));
+            _disposables.Add(topic, 
+                _connection.PacketSyncSubject
+                .Where(publish =>
+                    {
+                        if (publish != null && publish.MsgType == MsgType.Publish)
+                        {
+                            var msg = (Publish) publish.Message;
 
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+                            if (msg == null || !msg.Topic.StartsWith(topic))
+                                return false;
+
+                            return true;
+                        }
+
+                        return false;
+                    })
+                .SubscribeOn(Scheduler.Default)
+                .Subscribe(publish =>
+                    {
+                        var msg = (Publish) publish.Message;
+
+                        callback.Invoke(Encoding.UTF8.GetString(msg.Message)); 
+                    }));
+
+            _connection.BeginWrite(new Subscribe(_disposables.Keys.ToArray()));
         }
 
-        public void Subscribe(Action<byte[]> callback, string topic)
-        {
-            _disposables.Add(topic, _connection.PublishObservable.Where(publish => publish != null && publish.Topic.Equals(topic, StringComparison.InvariantCultureIgnoreCase)).Subscribe(publish => { callback.Invoke(publish.Message); }));
-
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
-        }
-       
         public void Unsubscribe(string topic)
         {
             _logger.Log(LogLevel.Trace, $"Unsubscribe from {topic}");
@@ -122,20 +154,18 @@ namespace RxMqtt.Client
 
             _disposables.Remove(topic);
 
-            _connection.Write(new Unsubscribe(new []{topic}));
+            _connection.BeginWrite(new Unsubscribe(new []{topic}));
         }
 
         #endregion
 
         #region PrivateMethods
         
-
-
         private void Ping(object sender)
         {
             _logger.Log(LogLevel.Trace, "Ping");
 
-            _connection.Write(new PingMsg());
+            _connection.BeginWrite(new PingMsg());
         }
 
         private void ResetKeepAliveTimer(MqttMessage mqttMessage)
