@@ -95,130 +95,96 @@ namespace RxMqtt.Broker
             }
         }
 
-        internal static Tuple<int, int> DecodeValue(IReadOnlyList<byte> buffer, int startIndex = 0)
-        {
-            var multiplier = 1;
-            var decodedValue = 0;
-            var encodedByte = 0x00;
-            var bytesUsedToStoreValue = startIndex;
-
-            do
-            {
-                encodedByte = buffer[bytesUsedToStoreValue];
-                bytesUsedToStoreValue++;
-
-                decodedValue += (encodedByte & 127) * multiplier;
-
-                multiplier *= 128;
-
-                if (multiplier > 128 * 128 * 128)
-                    break;
-
-            } while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
-
-            return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);
-        }
-
-        private List<List<byte>> SplitInBuffer(byte[] inBuffer)
+        private IEnumerable<List<byte>> SplitInBuffer(byte[] inBuffer)
         {
             var buffer = new List<byte>(inBuffer);
-            var returnBuffers = new List<List<byte>>();
 
             var startIndex = 0;
 
-            var packetLength = DecodeValue(buffer, 1).Item1 + 2;
+            var packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
 
             if (buffer.Count > packetLength)
             {
-                //var msgType = (MsgType)(byte)((inBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
-                //_logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
-
-
                 while (startIndex < buffer.Count)
                 {
-                    returnBuffers.Add(buffer.GetRange(startIndex, packetLength));
+                    packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
+
+                    if (startIndex + packetLength > buffer.Count)
+                        break;
+
+                    yield return buffer.GetRange(startIndex, packetLength);
 
                     startIndex += packetLength;
                 }
             }
             else
             {
-                returnBuffers.Add(buffer);
+                yield return buffer;
             }
-
-            return returnBuffers;
         }
 
         private void ProcessRead(byte[] inBuffer)
         {
-            //SplitInBuffer(inBuffer);
-
-
-            var msgType = (MsgType)(byte)((inBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
-
-            _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
-
-            var packetLength = DecodeValue(inBuffer, 1).Item1 + 2;
-
-            _logger.Log(LogLevel.Info, $"Decoded packet length => {packetLength}");
-
-            var buffer = new byte[packetLength];
-
-            Array.Copy(inBuffer, buffer, packetLength);
-
-            switch (msgType)
+            foreach (var buffer in SplitInBuffer(inBuffer))
             {
-                case MsgType.Publish:
-                    var publishMsg = new Publish(inBuffer);
+                var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
 
-                    BeginSend(new PublishAck(publishMsg.PacketId));
+                _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
-                    _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
+                switch (msgType)
+                {
+                    case MsgType.Publish:
+                        var publishMsg = new Publish(buffer.ToArray());
 
-                    break;
-                case MsgType.Connect:
-                    var connectMsg = new Connect(inBuffer);
+                        BeginSend(new PublishAck(publishMsg.PacketId));
 
-                    _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
+                        _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
 
-                    _clientId = connectMsg.ClientId;
+                        break;
+                    case MsgType.Connect:
+                        var connectMsg = new Connect(buffer.ToArray());
 
-                    _keepAliveDisposable?.Dispose();
+                        _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
-                    _keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
-                    {
-                        if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
+                        _clientId = connectMsg.ClientId;
 
-                        _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
+                        _keepAliveDisposable?.Dispose();
 
-                        _cancellationTokenSource.Cancel(false);
-                    });
+                        _keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
+                        {
+                            if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
 
-                    _logger = LogManager.GetLogger(_clientId);
+                            _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
 
-                    BeginSend(new ConnectAck());
-                    break;
-                case MsgType.PingRequest:
+                            _cancellationTokenSource.Cancel(false);
+                        });
+
+                        _logger = LogManager.GetLogger(_clientId);
+
+                        BeginSend(new ConnectAck());
+                        break;
+                    case MsgType.PingRequest:
 
 
-                    BeginSend(new PingResponse());
-                    break;
-                case MsgType.Subscribe:
-                    var subscribeMsg = new Subscribe(inBuffer);
+                        BeginSend(new PingResponse());
+                        break;
+                    case MsgType.Subscribe:
+                        var subscribeMsg = new Subscribe(buffer.ToArray());
 
-                    BeginSend(new SubscribeAck(subscribeMsg.PacketId));
+                        BeginSend(new SubscribeAck(subscribeMsg.PacketId));
 
-                    Subscribe(subscribeMsg.Topics);
-                    break;
-                case MsgType.PublishAck:
+                        Subscribe(subscribeMsg.Topics);
+                        break;
+                    case MsgType.PublishAck:
 
-                    break;
-                case MsgType.Disconnect:
+                        break;
+                    case MsgType.Disconnect:
 
-                    break;
-                default:
-                    _logger.Log(LogLevel.Warn, $"Ignoring message");
-                    break;
+                        break;
+                    default:
+                        _logger.Log(LogLevel.Warn, $"Ignoring message");
+                        break;
+                }
             }
 
             Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
@@ -254,11 +220,6 @@ namespace RxMqtt.Broker
             }
         }
 
-        class SendState{
-            
-            public Socket Socket { get; set; }
-        }
-
         private void BeginSend(MqttMessage message)
         {
 
@@ -289,5 +250,10 @@ namespace RxMqtt.Broker
             state.Socket.EndSend(asyncResult);
             asyncResult.AsyncWaitHandle.WaitOne();
         }
+    }
+
+    internal class SendState
+    {
+        public Socket Socket { get; set; }
     }
 }

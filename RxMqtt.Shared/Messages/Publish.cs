@@ -1,7 +1,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
 using NLog;
@@ -79,42 +78,50 @@ namespace RxMqtt.Shared.Messages
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, $"Publish Exception Buffer Length:{buffer.Length}, PacketId:{PacketId}, Topic:{Topic}, Buffer:{Encoding.UTF8.GetString(buffer.ToArray())}");
+                _logger.Log(LogLevel.Error, $"Publish Exception Buffer Length:{buffer.Length}, PacketId:{PacketId}, Topic:{Topic}, Buffer:{Encoding.UTF8.GetString(buffer.ToArray())} => {e.Message}");
             }
         }
 
         internal override byte[] GetBytes()
         {
-            var topicBytes = Encoding.UTF8.GetBytes(Topic);
-            var size = topicBytes.Length + (int)MsgSize.MessageId + 2;
-
-            if (Message != null)
-                size += Message.Length;
-
-            if (size > 1e+7)
-                throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7. ");
-
             var packet = new List<byte>();
-            var dupRetainFlags = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
 
-            dupRetainFlags |= IsDuplicate ? (byte)(1 << DupFlagOffset) : (byte)0x00;
-            dupRetainFlags |= Retain ? (byte)(1 << RetainFlagOffset) : (byte)0x00;
+            try
+            {
+                var topicBytes = Encoding.UTF8.GetBytes(Topic);
+                var size = topicBytes.Length + (int)MsgSize.MessageId + 2;
 
-            packet.Add(dupRetainFlags);
+                if (Message != null)
+                    size += Message.Length;
 
-            var sizeEnc = EncodeValue(size);
+                if (size > 1e+7)
+                    throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7. ");
+                
+                var dupRetainFlags = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
 
-            packet.AddRange(sizeEnc);
+                dupRetainFlags |= IsDuplicate ? (byte)(1 << DupFlagOffset) : (byte)0x00;
+                dupRetainFlags |= Retain ? (byte)(1 << RetainFlagOffset) : (byte)0x00;
 
-            if (sizeEnc.Length == 1)
-                packet.Add(0x00);
+                packet.Add(dupRetainFlags);
 
-            packet.AddRange(EncodeValue(topicBytes.Length));
-            packet.AddRange(topicBytes);
-            packet.AddRange(UshortToBytes(PacketId));
+                var sizeEnc = EncodeValue(size);
 
-            if (Message != null)
-                packet.AddRange(Message);
+                packet.AddRange(sizeEnc);
+
+                if (sizeEnc.Length == 1)
+                    packet.Add(0x00);
+
+                packet.AddRange(EncodeValue(topicBytes.Length));
+                packet.AddRange(topicBytes);
+                packet.AddRange(UshortToBytes(PacketId));
+
+                if (Message != null)
+                    packet.AddRange(Message);
+            }
+            catch (Exception e)
+            {
+                Logger.Log(LogLevel.Error, $"Publish.GetBytes => {e.Message}");
+            }
 
             return packet.ToArray();
         }

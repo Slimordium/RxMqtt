@@ -21,8 +21,6 @@ namespace RxMqtt.Shared.Messages
         {
             PacketId = BytesToUshort(new [] {buffer[2], buffer[3]});
 
-            Logger.Log(LogLevel.Debug, $"PublishAck {PacketId} - {BitConverter.ToString(buffer)}");
-
             MsgType = MsgType.PublishAck;
         }
 

@@ -1,5 +1,4 @@
 
-using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
@@ -15,22 +14,18 @@ namespace RxMqtt.Shared.Messages
             PacketId = packetId;
         }
 
-        public SubscribeAck(byte[] buffer)
+        public SubscribeAck(IReadOnlyList<byte> buffer)
         {
             MsgType = MsgType.SubscribeAck;
 
-            PacketId = BitConverter.ToUInt16(buffer, 2);
+            PacketId = BytesToUshort(new[] { buffer[2], buffer[3] });
         }
 
         internal override byte[] GetBytes()
         {
             var buffer = new List<byte> {((byte) MsgType.SubscribeAck << (byte) MsgOffset.Type) | 0x00};
 
-            var encodeValue = EncodeValue(PacketId);
-
-            buffer.Add((byte)encodeValue.Length); //Remaining length
-
-            buffer.AddRange(encodeValue);
+            buffer.AddRange(UshortToBytes(PacketId));
 
             return buffer.ToArray();
         }
