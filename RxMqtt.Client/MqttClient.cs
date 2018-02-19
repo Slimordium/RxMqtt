@@ -119,6 +119,12 @@ namespace RxMqtt.Client
 
         public void Subscribe(Action<string> callback, string topic)
         {
+            if (_disposables.ContainsKey(topic))
+            {
+                _logger.Log(LogLevel.Warn, $"Already subscribed to '{topic}'");
+                return;
+            }
+
             _disposables.Add(topic, 
                 _connection.PacketSyncSubject
                 .Where(publish =>

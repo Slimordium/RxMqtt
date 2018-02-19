@@ -55,7 +55,7 @@ namespace RxMqtt.Shared.Messages
             clientIdLength |= buffer[index++];
 
             var clientIdBuffer = new byte[clientIdLength];
-            Array.Copy(buffer, index, clientIdBuffer, 0, clientIdLength);
+            Buffer.BlockCopy(buffer, index, clientIdBuffer, 0, clientIdLength);
 
             ClientId = Encoding.UTF8.GetString(clientIdBuffer);
         }

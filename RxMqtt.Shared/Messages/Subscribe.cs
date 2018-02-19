@@ -44,7 +44,7 @@ namespace RxMqtt.Shared.Messages
 
             var packetLength = DecodeValue(buffer, 1);
 
-            PacketId = (ushort)DecodeValue(new[] {buffer[3], buffer[4]}).Item1;
+            PacketId = BytesToUshort(new[] {buffer[packetLength.Item2 + 1], buffer[packetLength.Item2 + 2]});
 
             var topics = new List<string>();
 
@@ -61,7 +61,7 @@ namespace RxMqtt.Shared.Messages
 
                     var topicBuffer = new byte[topicLength];
 
-                    Array.Copy(buffer, topicLengthIndex + 1, topicBuffer, 0, topicLength);
+                    Buffer.BlockCopy(buffer, topicLengthIndex + 1, topicBuffer, 0, topicLength);
 
                     topics.Add(Encoding.UTF8.GetString(topicBuffer));
 
@@ -139,7 +139,7 @@ namespace RxMqtt.Shared.Messages
                 buffer[index++] = (byte)((topicsUtf8[topicIdx].Length >> 8) & 0x00FF); 
                 buffer[index++] = (byte)(topicsUtf8[topicIdx].Length & 0x00FF);
 
-                Array.Copy(topicsUtf8[topicIdx], 0, buffer, index, topicsUtf8[topicIdx].Length);
+                Buffer.BlockCopy(topicsUtf8[topicIdx], 0, buffer, index, topicsUtf8[topicIdx].Length);
 
                 index += topicsUtf8[topicIdx].Length;
 

@@ -17,13 +17,24 @@ namespace RxMqtt.Broker.Console
 
             //var ddd = MqttMessage.DecodeValue(asdf);
 
-            //var publish = new Publish("test", Encoding.UTF8.GetBytes("1test1"));
+
+            var publish = new Publish("test", Encoding.UTF8.GetBytes("ajkdafhadfhjkjdf halkjshtest test test tsajkdafhadfhjkjdf halkjshtest test test tst test test test test test test test st test test testst test teest  test test st test test testst test teest  test test st test test testst test teest test test test tst test test test test test test test st testt test test test test test test test st test test testst test teest  test test st test test testst test teest  test test st test test testst test teest test test test tst test test test test test test test st test"));
 
 
-            //var bytes = publish.GetBytes();
+            var bytes = publish.GetBytes();
 
-            //var publishReply = new Publish(bytes);
+            var publishReply = new Publish(bytes);
 
+            //var pc = new Subscribe(new [] {"test"});
+
+            //var b = pc.GetBytes();
+
+            //var pcs = new Subscribe(b);
+
+
+            var newsd = new PublishAck(publishReply.PacketId);
+
+            var asdfasdf = newsd.GetBytes();
 
             var cts = new CancellationTokenSource();
 

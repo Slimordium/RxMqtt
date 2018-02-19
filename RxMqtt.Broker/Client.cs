@@ -85,7 +85,7 @@ namespace RxMqtt.Broker
 
                 var newBuffer = new byte[bytesIn];
 
-                Array.Copy(ar.Buffer, newBuffer, bytesIn);
+                Buffer.BlockCopy(ar.Buffer,0, newBuffer,0, bytesIn);
 
                 ar.Callback.Invoke(newBuffer);
             }
@@ -95,24 +95,26 @@ namespace RxMqtt.Broker
             }
         }
 
-        private IEnumerable<List<byte>> SplitInBuffer(byte[] inBuffer)
+        private IEnumerable<byte[]> SplitInBuffer(byte[] buffer)
         {
-            var buffer = new List<byte>(inBuffer);
-
             var startIndex = 0;
 
             var packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
 
-            if (buffer.Count > packetLength)
+            if (buffer.Length > packetLength)
             {
-                while (startIndex < buffer.Count)
+                while (startIndex < buffer.Length)
                 {
                     packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
 
-                    if (startIndex + packetLength > buffer.Count)
+                    if (startIndex + packetLength > buffer.Length)
                         break;
 
-                    yield return buffer.GetRange(startIndex, packetLength);
+                    var packetBuffer = new byte[packetLength];
+
+                    Buffer.BlockCopy(buffer, startIndex, packetBuffer,0, packetLength);
+
+                    yield return packetBuffer;
 
                     startIndex += packetLength;
                 }
@@ -125,16 +127,18 @@ namespace RxMqtt.Broker
 
         private void ProcessRead(byte[] inBuffer)
         {
-            foreach (var buffer in SplitInBuffer(inBuffer))
-            {
-                var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
+            //var buffer = inBuffer;
+
+            //foreach (var buffer in SplitInBuffer(inBuffer))
+            //{
+                var msgType = (MsgType) (byte) ((inBuffer[0] & 0xf0) >> (byte) MsgOffset.Type);
 
                 _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
                 switch (msgType)
                 {
                     case MsgType.Publish:
-                        var publishMsg = new Publish(buffer.ToArray());
+                        var publishMsg = new Publish(inBuffer);
 
                         BeginSend(new PublishAck(publishMsg.PacketId));
 
@@ -142,7 +146,7 @@ namespace RxMqtt.Broker
 
                         break;
                     case MsgType.Connect:
-                        var connectMsg = new Connect(buffer.ToArray());
+                        var connectMsg = new Connect(inBuffer);
 
                         _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
@@ -169,7 +173,7 @@ namespace RxMqtt.Broker
                         BeginSend(new PingResponse());
                         break;
                     case MsgType.Subscribe:
-                        var subscribeMsg = new Subscribe(buffer.ToArray());
+                        var subscribeMsg = new Subscribe(inBuffer);
 
                         BeginSend(new SubscribeAck(subscribeMsg.PacketId));
 
@@ -185,7 +189,7 @@ namespace RxMqtt.Broker
                         _logger.Log(LogLevel.Warn, $"Ignoring message");
                         break;
                 }
-            }
+            //}
 
             Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
 

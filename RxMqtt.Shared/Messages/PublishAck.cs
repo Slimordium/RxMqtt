@@ -26,7 +26,11 @@ namespace RxMqtt.Shared.Messages
 
         internal override byte[] GetBytes()
         {
-            var buffer = new List<byte> {((byte) MsgType.PublishAck << (byte) MsgOffset.Type) | 0x00, 0x02};
+            var buffer = new List<byte>
+            {
+                ((byte) MsgType.PublishAck << (byte) MsgOffset.Type) | 0x00,
+                0x02
+            };
 
             buffer.AddRange(UshortToBytes(PacketId));
 

@@ -1,6 +1,5 @@
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using NLog;
@@ -47,34 +46,31 @@ namespace RxMqtt.Shared.Messages
         {
             try
             {
-                var newBuffer = new List<byte>(buffer);
+                //TODO : Broken... message length is not reliable 
 
-                newBuffer = newBuffer.GetRange(1, newBuffer.Count - 1);
+                //First byte is the type of payload, so we can igrnore it
+                //The next 1 - 4 bytes (variable) determine packet length
+                //The 2 bytes after that are the length of the topic
+                //The 2 bytes after the topic are the Packet ID
+                //The remaining bytes are the payload
 
-                var len = DecodeValue(newBuffer);
+                var decodeValue = DecodeValue(buffer, 1);
+                var lengthByteCount = decodeValue.Item2;
+                var topicLength = BytesToUshort(new[] {buffer[1 + lengthByteCount], buffer[2 + lengthByteCount]});
+                var topicStartIndex = 1 + lengthByteCount + 2;
+                var topicArray = new byte[topicLength];
+                var messageStartIndex = 1 + lengthByteCount + 2 + topicLength + 2;
+                var messageLength = buffer.Length - messageStartIndex;
 
-                var index = len.Item2;
+                Buffer.BlockCopy(buffer, topicStartIndex, topicArray, 0, topicLength);
 
-                var bufferAfterGetRemaining = newBuffer.GetRange(index, newBuffer.Count - index);
+                Topic = Encoding.UTF8.GetString(topicArray);
 
-                if (bufferAfterGetRemaining[0] == 0x00)
-                    bufferAfterGetRemaining = bufferAfterGetRemaining.GetRange(1, bufferAfterGetRemaining.Count - 1);
+                PacketId = BytesToUshort(new[] {buffer[topicStartIndex + topicLength], buffer[topicStartIndex + topicLength + 1]});
 
-                var topicLength = 0;
+                Message = new byte[messageLength]; //topicLength - (2 for packet ID) - (2 for topic length) - (1 for payload type)
 
-                len = DecodeValue(bufferAfterGetRemaining);
-
-                index = len.Item2;
-
-                topicLength = len.Item1;
-
-                Topic = Encoding.UTF8.GetString(bufferAfterGetRemaining.GetRange(index, topicLength).ToArray());
-
-                var bufferAfterGetTopic = bufferAfterGetRemaining.GetRange(index + topicLength, bufferAfterGetRemaining.Count - (index + topicLength));
-
-                PacketId = BytesToUshort(new[] {bufferAfterGetTopic[0], bufferAfterGetTopic[1]});
-
-                Message = bufferAfterGetTopic.GetRange(2, bufferAfterGetTopic.Count - 2).ToArray();
+                Buffer.BlockCopy(buffer, messageStartIndex, Message, 0, buffer.Length - messageStartIndex);
             }
             catch (Exception e)
             {
@@ -84,46 +80,48 @@ namespace RxMqtt.Shared.Messages
 
         internal override byte[] GetBytes()
         {
-            var packet = new List<byte>();
+            byte[] packet = null;
 
             try
             {
                 var topicBytes = Encoding.UTF8.GetBytes(Topic);
-                var size = topicBytes.Length + (int)MsgSize.MessageId + 2;
+                var messageLength = topicBytes.Length + (int)MsgSize.MessageId + 2;
 
                 if (Message != null)
-                    size += Message.Length;
+                    messageLength += Message.Length;
 
-                if (size > 1e+7)
+                var encodedPacketSize = EncodeValue(messageLength);
+                var topicLength = UshortToBytes(topicBytes.Length);
+                var packetId = UshortToBytes(PacketId);
+
+                packet = new byte[messageLength + encodedPacketSize.Length + 1];
+
+                if (messageLength > 1e+7)
                     throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7. ");
                 
-                var dupRetainFlags = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
+                var messageTypeDupQosRetain = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
 
-                dupRetainFlags |= IsDuplicate ? (byte)(1 << DupFlagOffset) : (byte)0x00;
-                dupRetainFlags |= Retain ? (byte)(1 << RetainFlagOffset) : (byte)0x00;
+                messageTypeDupQosRetain |= IsDuplicate ? (byte)(1 << DupFlagOffset) : (byte)0x00;
+                messageTypeDupQosRetain |= Retain ? (byte)(1 << RetainFlagOffset) : (byte)0x00;
 
-                packet.Add(dupRetainFlags);
+                packet[0] = messageTypeDupQosRetain;
 
-                var sizeEnc = EncodeValue(size);
+                Buffer.BlockCopy(encodedPacketSize, 0, packet, 1, encodedPacketSize.Length); //1 = the first byte in the array
 
-                packet.AddRange(sizeEnc);
+                Buffer.BlockCopy(topicLength, 0, packet, 1 + encodedPacketSize.Length, topicLength.Length);
 
-                if (sizeEnc.Length == 1)
-                    packet.Add(0x00);
+                Buffer.BlockCopy(topicBytes, 0, packet, 1 + encodedPacketSize.Length + topicLength.Length, topicBytes.Length);
+                
+                Buffer.BlockCopy(packetId, 0, packet, 1 + encodedPacketSize.Length + topicLength.Length + topicBytes.Length, packetId.Length);
 
-                packet.AddRange(EncodeValue(topicBytes.Length));
-                packet.AddRange(topicBytes);
-                packet.AddRange(UshortToBytes(PacketId));
-
-                if (Message != null)
-                    packet.AddRange(Message);
+                Buffer.BlockCopy(Message, 0, packet, 1 + encodedPacketSize.Length + topicLength.Length + topicBytes.Length + packetId.Length, Message.Length);
             }
             catch (Exception e)
             {
                 Logger.Log(LogLevel.Error, $"Publish.GetBytes => {e.Message}");
             }
 
-            return packet.ToArray();
+            return packet;
         }
     }
 }

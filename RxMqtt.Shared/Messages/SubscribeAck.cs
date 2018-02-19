@@ -25,7 +25,11 @@ namespace RxMqtt.Shared.Messages
         {
             var buffer = new List<byte> {((byte) MsgType.SubscribeAck << (byte) MsgOffset.Type) | 0x00};
 
-            buffer.AddRange(UshortToBytes(PacketId));
+            buffer.Add(0x03); //Remaining length
+
+            buffer.AddRange(UshortToBytes(PacketId)); //Always 2 bytes
+
+            buffer.Add(0x01); //QOS 1
 
             return buffer.ToArray();
         }

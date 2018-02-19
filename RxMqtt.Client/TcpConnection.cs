@@ -126,8 +126,6 @@ namespace RxMqtt.Client{
                 }
 
                 var socketState = new StreamState();
-
-
                 var asyncResult = _stream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
 
                 asyncResult.AsyncWaitHandle.WaitOne();
@@ -148,7 +146,6 @@ namespace RxMqtt.Client{
                 _stream.EndWrite(asyncResult);
 
                 asyncResult.AsyncWaitHandle.WaitOne();
-
 
                 ar.Dispose();
 
@@ -217,7 +214,7 @@ namespace RxMqtt.Client{
 
             try
             {
-                var socketState = new StreamState {CallBack = ProcessRead};
+                var socketState = new StreamState {CallBack = buffer => { ProcessRead(ref buffer);} };
 
                 var asyncResult = _stream.BeginRead(socketState.Buffer, 0, socketState.Buffer.Length, EndRead, socketState);
 
@@ -232,47 +229,26 @@ namespace RxMqtt.Client{
             }
         }
 
-        internal static Tuple<int, int> DecodeValue(IReadOnlyList<byte> buffer, int startIndex = 0)
+        private static IEnumerable<byte[]> SplitInBuffer(byte[] buffer)
         {
-            var multiplier = 1;
-            var decodedValue = 0;
-            var encodedByte = 0x00;
-            var bytesUsedToStoreValue = startIndex;
-
-            do
-            {
-                encodedByte = buffer[bytesUsedToStoreValue];
-                bytesUsedToStoreValue++;
-
-                decodedValue += (encodedByte & 127) * multiplier;
-
-                multiplier *= 128;
-
-                if (multiplier > 128 * 128 * 128)
-                    break;
-            } while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
-
-            return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);
-        }
-
-        private IEnumerable<List<byte>> SplitInBuffer(byte[] inBuffer)
-        {
-            var buffer = new List<byte>(inBuffer);
-
             var startIndex = 0;
 
-            var packetLength = DecodeValue(buffer, startIndex + 1).Item1 + 2;
+            var packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
 
-            if (buffer.Count > packetLength)
+            if (buffer.Length > packetLength)
             {
-                while (startIndex < buffer.Count)
+                while (startIndex < buffer.Length)
                 {
-                    packetLength = DecodeValue(buffer, startIndex + 1).Item1 + 2;
+                    packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
 
-                    if (startIndex + packetLength > buffer.Count)
+                    if (startIndex + packetLength > buffer.Length)
                         break;
 
-                    yield return buffer.GetRange(startIndex, packetLength);
+                    var packetBuffer = new byte[packetLength];
+
+                    Buffer.BlockCopy(buffer, startIndex, packetBuffer, 0, packetLength);
+
+                    yield return packetBuffer;
 
                     startIndex += packetLength;
                 }
@@ -283,18 +259,18 @@ namespace RxMqtt.Client{
             }
         }
 
-        protected void ProcessRead(byte[] inBuffer)
+        protected void ProcessRead(ref byte[] inBuffer)
         {
-            foreach (var buffer in SplitInBuffer(inBuffer))
+            foreach (var nextBuffer in SplitInBuffer(inBuffer))
             {
-                var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
+                var msgType = (MsgType) (byte) ((nextBuffer[0] & 0xf0) >> (byte) MsgOffset.Type);
 
                 _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
                 switch (msgType)
                 {
                     case MsgType.Publish:
-                        var msg = new Publish(buffer.ToArray());
+                        var msg = new Publish(nextBuffer);
                         PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg});
 
                         BeginWrite(new PublishAck(msg.PacketId));
@@ -305,8 +281,7 @@ namespace RxMqtt.Client{
                     case MsgType.PingResponse:
                         break;
                     case MsgType.PublishAck:
-
-                        var pubAck = new PublishAck(buffer.ToArray());
+                        var pubAck = new PublishAck(nextBuffer.ToArray());
 
                         PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck});
                         break;
@@ -339,7 +314,7 @@ namespace RxMqtt.Client{
                 {
                     newBuffer = new byte[bytesIn];
 
-                    Array.Copy(asyncState.Buffer, newBuffer, bytesIn);
+                    Buffer.BlockCopy(asyncState.Buffer, 0, newBuffer,0, bytesIn);
                 }
 
                 asyncState.CallBack.Invoke(newBuffer);
