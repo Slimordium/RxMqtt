@@ -25,13 +25,14 @@ namespace RxMqtt.Client.Console
             if (string.IsNullOrEmpty(ip))
                 ip = "127.0.0.1";
 
-            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 120); // "172.16.0.244"
+            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883); // "172.16.0.244"
 
-            _mqttClient.InitializeAsync();
+            _mqttClient.InitializeAsync().Wait();
 
             while (true)
             {
                 System.Console.WriteLine("s => subscribe");
+                System.Console.WriteLine("u => unsubscribe");
                 System.Console.WriteLine("p => publish");
                 System.Console.WriteLine("q => quit");
 
@@ -98,7 +99,7 @@ namespace RxMqtt.Client.Console
 
         private static void Handler(string s)
         {
-            System.Console.WriteLine($"In => '{s}'");
+            System.Console.WriteLine($"In => {s}");
         }
     }
 }

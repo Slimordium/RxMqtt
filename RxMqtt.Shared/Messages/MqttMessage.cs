@@ -114,9 +114,11 @@ namespace RxMqtt.Shared.Messages
             var decodedValue = 0;
             var bytesUsedToStoreValue = 0;
             
-
             while (true)
             {
+                if (startIndex > buffer.Count)
+                    break;
+
                 var encodedByte = buffer[startIndex];
                 startIndex++;
 
@@ -129,13 +131,10 @@ namespace RxMqtt.Shared.Messages
 
                 bytesUsedToStoreValue++;
 
-                if ((encodedByte & 128) == 0 || bytesUsedToStoreValue >= 4)
+                if ((encodedByte & 128) == 0 || bytesUsedToStoreValue >= 4 || startIndex > startIndex + 3)
                 {
-                    break;
+                    break;  
                 }
-
-
-
             } //while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
 
             return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);

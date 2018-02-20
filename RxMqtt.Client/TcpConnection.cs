@@ -5,7 +5,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Reflection;
 using System.Security.Authentication;
@@ -27,12 +26,15 @@ namespace RxMqtt.Client{
 
         protected static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private static readonly ManualResetEventSlim _readEvent = new ManualResetEventSlim(true);
-        private static readonly ManualResetEventSlim _writeEvent = new ManualResetEventSlim(true);
+        private ReadWriteAsync _readWriteAsync;
 
         private Task _readTask;
 
         protected string HostName;
+
+        private CancellationToken _cancellationToken = new CancellationToken();
+
+        private ManualResetEventSlim _manualResetEventSlim = new ManualResetEventSlim(true);
 
         internal TcpConnection
         (
@@ -87,7 +89,11 @@ namespace RxMqtt.Client{
 
                 if (_status == Status.Initialized)
                 {
-                    _readTask = Task.Factory.StartNew(BeginRead, TaskCreationOptions.LongRunning);
+                    _readWriteAsync = new ReadWriteAsync(ref _stream);
+
+                    //_readSync = new ReadSync(ref _stream);
+
+                    _readTask = Task.Factory.StartNew(ReadLoop, TaskCreationOptions.LongRunning);
                 }
             }
             catch (Exception e)
@@ -100,61 +106,21 @@ namespace RxMqtt.Client{
             return _status;
         }
 
-        internal void BeginWrite(MqttMessage message)
+        private void ReadLoop()
         {
-            if (message == null)
-                return;
-
-            if (_status != Status.Initialized)
+            while (!_cancellationToken.IsCancellationRequested)
             {
-                return;
-            }
+                _manualResetEventSlim.Wait(_cancellationToken);
+                _manualResetEventSlim.Reset();
 
-            _writeEvent.Wait();
-            _writeEvent.Reset();
-
-            _logger.Log(LogLevel.Trace, $"Out => {message.MsgType}");
-
-            try
-            {
-                var buffer = message.GetBytes();
-
-                if (buffer.Length > 1e+7)
-                {
-                    _logger.Log(LogLevel.Error, "Message size greater than maximum of 1e+7 or 10mb. Not publishing");
-                    return;
-                }
-
-                var socketState = new StreamState();
-                var asyncResult = _stream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
-
-                asyncResult.AsyncWaitHandle.WaitOne();
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-            catch (Exception)
-            {
+                _readWriteAsync.Read(ProcessPackets);
+                //_readAsync.Read(ProcessReadBuffer);
             }
         }
 
-        private static void EndWrite(IAsyncResult asyncResult)
+        internal void BeginWrite(MqttMessage mqttMessage)
         {
-            try
-            {
-                var ar = (StreamState) asyncResult.AsyncState;
-                _stream.EndWrite(asyncResult);
-
-                asyncResult.AsyncWaitHandle.WaitOne();
-
-                ar.Dispose();
-
-                _writeEvent.Set();
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, e);
-            }
+            _readWriteAsync.Write(mqttMessage);
         }
 
         private async Task<Status> InitializeConnection(int port = 8883)
@@ -206,84 +172,31 @@ namespace RxMqtt.Client{
 
             return status;
         }
-
-        private void BeginRead()
+        private void ProcessPackets(byte[] buffer) 
         {
-            _readEvent.Wait();
-            _readEvent.Reset();
-
-            try
+            foreach (var nextBuffer in Utilities.ParseReadBuffer(buffer))
             {
-                var socketState = new StreamState {CallBack = buffer => { ProcessRead(ref buffer);} };
+                var msgType = (MsgType)(byte)((nextBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
-                var asyncResult = _stream.BeginRead(socketState.Buffer, 0, socketState.Buffer.Length, EndRead, socketState);
-
-                asyncResult.AsyncWaitHandle.WaitOne();
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, e);
-            }
-        }
-
-        private static IEnumerable<byte[]> SplitInBuffer(byte[] buffer)
-        {
-            var startIndex = 0;
-
-            var packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
-
-            if (buffer.Length > packetLength)
-            {
-                while (startIndex < buffer.Length)
-                {
-                    packetLength = MqttMessage.DecodeValue(buffer, startIndex + 1).Item1 + 2;
-
-                    if (startIndex + packetLength > buffer.Length)
-                        break;
-
-                    var packetBuffer = new byte[packetLength];
-
-                    Buffer.BlockCopy(buffer, startIndex, packetBuffer, 0, packetLength);
-
-                    yield return packetBuffer;
-
-                    startIndex += packetLength;
-                }
-            }
-            else
-            {
-                yield return buffer;
-            }
-        }
-
-        protected void ProcessRead(ref byte[] inBuffer)
-        {
-            foreach (var nextBuffer in SplitInBuffer(inBuffer))
-            {
-                var msgType = (MsgType) (byte) ((nextBuffer[0] & 0xf0) >> (byte) MsgOffset.Type);
-
-                _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
+                _logger.Log(LogLevel.Info, $"In <= {msgType}");
 
                 switch (msgType)
                 {
                     case MsgType.Publish:
                         var msg = new Publish(nextBuffer);
-                        PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg});
+                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
 
-                        BeginWrite(new PublishAck(msg.PacketId));
+                        _readWriteAsync.Write(new PublishAck(msg.PacketId));
                         break;
                     case MsgType.ConnectAck:
-                        PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.ConnectAck});
+                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
                         break;
                     case MsgType.PingResponse:
                         break;
                     case MsgType.PublishAck:
                         var pubAck = new PublishAck(nextBuffer.ToArray());
 
-                        PacketSyncSubject.OnNext(new PacketEnvelope {MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck});
+                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
                         break;
                     default:
                         //var msgId = MqttMessage.BytesToUshort(new[] { buffer[2], buffer[3] });
@@ -293,44 +206,7 @@ namespace RxMqtt.Client{
                 }
             }
 
-            _readEvent.Set();
-
-            BeginRead();
-        }
-
-        private static void EndRead(IAsyncResult asyncResult)
-        {
-            try
-            {
-                byte[] newBuffer = null;
-
-                var asyncState = (StreamState) asyncResult.AsyncState;
-
-                asyncResult.AsyncWaitHandle.WaitOne();
-
-                var bytesIn = _stream.EndRead(asyncResult);
-
-                if (bytesIn > 0)
-                {
-                    newBuffer = new byte[bytesIn];
-
-                    Buffer.BlockCopy(asyncState.Buffer, 0, newBuffer,0, bytesIn);
-                }
-
-                asyncState.CallBack.Invoke(newBuffer);
-
-                asyncState.Dispose();
-            }
-            catch (ObjectDisposedException)
-            {
-                return;
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, e.Message);
-
-                Task.Delay(1000).Wait();
-            }
+            _manualResetEventSlim.Set();
         }
 
         #region PrivateFields
@@ -347,46 +223,5 @@ namespace RxMqtt.Client{
         private string _connectionId;
 
         #endregion
-    }
-
-    internal class PacketEnvelope{
-        public MsgType MsgType { get; set; }
-
-        public MqttMessage Message { get; set; }
-
-        public int PacketId { get; set; }
-    }
-
-    internal class StreamState : IDisposable{
-        public byte[] Buffer { get; set; } = new byte[300000];
-
-        public int BytesIn { get; set; }
-
-        public Action<byte[]> CallBack { get; set; }
-
-        ~StreamState()
-        {
-            Dispose(false);
-        }
-
-        private void ReleaseUnmanagedResources()
-        {
-            Buffer = null;
-            CallBack = null;
-        }
-
-        private void Dispose(bool disposing)
-        {
-            ReleaseUnmanagedResources();
-            if (disposing)
-            {
-            }
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
     }
 }

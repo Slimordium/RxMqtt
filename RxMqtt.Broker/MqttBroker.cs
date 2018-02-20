@@ -101,7 +101,7 @@ namespace RxMqtt.Broker
             var socket = listener.EndAccept(asyncResult);
 
             socket.UseOnlyOverlappedIO = true;
-            socket.Blocking = false;
+            socket.Blocking = true;
             socket.ReceiveBufferSize = 300000;
             socket.SendBufferSize = 300000;
             
