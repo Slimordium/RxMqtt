@@ -12,6 +12,8 @@ namespace RxMqtt.Shared.Messages
     public class Publish : MqttMessage{
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
+        private const int MessageStartOffset = 1;
+
         private const byte DupFlagMask = 0x08;
         private const byte DupFlagOffset = 0x03;
 
@@ -46,20 +48,18 @@ namespace RxMqtt.Shared.Messages
         {
             try
             {
-                //TODO : Broken... message length is not reliable 
-
                 //First byte is the type of payload, so we can igrnore it
                 //The next 1 - 4 bytes (variable) determine packet length
                 //The 2 bytes after that are the length of the topic
                 //The 2 bytes after the topic are the Packet ID
                 //The remaining bytes are the payload
 
-                var decodeValue = DecodeValue(buffer, 1);
+                var decodeValue = DecodeValue(buffer, MessageStartOffset);
                 var lengthByteCount = decodeValue.Item2;
                 var topicLength = BytesToUshort(new[] {buffer[1 + lengthByteCount], buffer[2 + lengthByteCount]});
-                var topicStartIndex = 1 + lengthByteCount + 2;
+                var topicStartIndex = MessageStartOffset + lengthByteCount + 2;
                 var topicArray = new byte[topicLength];
-                var messageStartIndex = 1 + lengthByteCount + 2 + topicLength + 2;
+                var messageStartIndex = MessageStartOffset + lengthByteCount + 2 + topicLength + 2;
                 var messageLength = buffer.Length - messageStartIndex;
 
                 Buffer.BlockCopy(buffer, topicStartIndex, topicArray, 0, topicLength);
@@ -70,7 +70,14 @@ namespace RxMqtt.Shared.Messages
 
                 Message = new byte[messageLength]; //topicLength - (2 for packet ID) - (2 for topic length) - (1 for payload type)
 
-                Buffer.BlockCopy(buffer, messageStartIndex, Message, 0, buffer.Length - messageStartIndex);
+                if (messageLength < buffer.Length - messageStartIndex)
+                {
+                    Buffer.BlockCopy(buffer, messageStartIndex, Message, 0, buffer.Length - messageStartIndex);
+                }
+                else
+                {
+                    _logger.Log(LogLevel.Warn, $"Invalid buffer! => Buffer Length:{buffer.Length}, PacketId:{PacketId}, Topic:{Topic}, Minimum packet length: {decodeValue.Item1}");
+                }
             }
             catch (Exception e)
             {
@@ -84,6 +91,7 @@ namespace RxMqtt.Shared.Messages
 
             try
             {
+                
                 var topicBytes = Encoding.UTF8.GetBytes(Topic);
                 var messageLength = topicBytes.Length + (int)MsgSize.MessageId + 2;
 
@@ -106,15 +114,15 @@ namespace RxMqtt.Shared.Messages
 
                 packet[0] = messageTypeDupQosRetain;
 
-                Buffer.BlockCopy(encodedPacketSize, 0, packet, 1, encodedPacketSize.Length); //1 = the first byte in the array
+                Buffer.BlockCopy(encodedPacketSize, 0, packet, MessageStartOffset, encodedPacketSize.Length); //1 = the first byte in the array
 
-                Buffer.BlockCopy(topicLength, 0, packet, 1 + encodedPacketSize.Length, topicLength.Length);
+                Buffer.BlockCopy(topicLength, 0, packet, MessageStartOffset + encodedPacketSize.Length, topicLength.Length);
 
-                Buffer.BlockCopy(topicBytes, 0, packet, 1 + encodedPacketSize.Length + topicLength.Length, topicBytes.Length);
+                Buffer.BlockCopy(topicBytes, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length, topicBytes.Length);
                 
-                Buffer.BlockCopy(packetId, 0, packet, 1 + encodedPacketSize.Length + topicLength.Length + topicBytes.Length, packetId.Length);
+                Buffer.BlockCopy(packetId, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length + topicBytes.Length, packetId.Length);
 
-                Buffer.BlockCopy(Message, 0, packet, 1 + encodedPacketSize.Length + topicLength.Length + topicBytes.Length + packetId.Length, Message.Length);
+                Buffer.BlockCopy(Message, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length + topicBytes.Length + packetId.Length, Message.Length);
             }
             catch (Exception e)
             {

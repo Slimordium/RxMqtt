@@ -10,7 +10,7 @@ namespace RxMqtt.Shared{
             var decodeValue = MqttMessage.DecodeValue(buffer, startIndex + 1);
             var packetLength = decodeValue.Item1 + decodeValue.Item2 + 1;
 
-            if (buffer.Length > packetLength)
+            if (buffer != null &&  buffer.Length > packetLength)
             {
                 while (startIndex < buffer.Length)
                 {

@@ -116,7 +116,7 @@ namespace RxMqtt.Shared.Messages
             
             while (true)
             {
-                if (startIndex > buffer.Count)
+                if (buffer == null || startIndex > buffer.Count)
                     break;
 
                 var encodedByte = buffer[startIndex];

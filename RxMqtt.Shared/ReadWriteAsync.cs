@@ -1,36 +1,41 @@
 ﻿using System;
 using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using NLog;
+using RxMqtt.Client;
+using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
-namespace RxMqtt.Client{
-    internal class ReadWriteAsync{
+namespace RxMqtt.Shared
+{
+    internal class ReadWriteAsync : IReadWriteStream
+    {
 
-        private static readonly ManualResetEventSlim _readEvent = new ManualResetEventSlim(true); //Not sure if this will be needed
-        private static readonly ManualResetEventSlim _writeEvent = new ManualResetEventSlim(true);//Not sure if this will be needed
-        private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
-        private static Stream _stream;
+        private readonly ManualResetEventSlim _readEvent = new ManualResetEventSlim(true); //Not sure if this will be needed
+        private readonly ManualResetEventSlim _writeEvent = new ManualResetEventSlim(true);//Not sure if this will be needed
+        private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+        private readonly NetworkStream _networkStream;
 
-        internal ReadWriteAsync(ref Stream stream)
+        internal ReadWriteAsync(ref NetworkStream networkStream)
         {
-            _stream = stream;
+            _networkStream = networkStream;
         }
 
         /// <summary>
         /// Will most likely read several packets when incoming traffic is high
         /// </summary>
         /// <param name="callback"></param>
-        internal void Read(Action<byte[]> callback)
+        public void Read(Action<byte[]> callback)
         {
             _readEvent.Wait();
             _readEvent.Reset();
 
             try
             {
-                var socketState = new StreamState { CallBack = callback };
+                var state = new StreamState { CallBack = callback, NetworkStream = _networkStream};
 
-                var asyncResult = _stream.BeginRead(socketState.Buffer, 0, socketState.Buffer.Length, EndRead, socketState);
+                var asyncResult = _networkStream.BeginRead(state.Buffer, 0, state.Buffer.Length, EndRead, state);
 
                 asyncResult.AsyncWaitHandle.WaitOne();
             }
@@ -43,14 +48,14 @@ namespace RxMqtt.Client{
             }
         }
 
-        private static void EndRead(IAsyncResult asyncResult)
+        private void EndRead(IAsyncResult asyncResult)
         {
             try
             {
                 byte[] newBuffer = null;
 
                 var asyncState = (StreamState)asyncResult.AsyncState;
-                var bytesIn = _stream.EndRead(asyncResult);
+                var bytesIn = asyncState.NetworkStream.EndRead(asyncResult);
 
                 asyncResult.AsyncWaitHandle.WaitOne();
 
@@ -77,7 +82,7 @@ namespace RxMqtt.Client{
             _readEvent.Set();
         }
 
-        internal void Write(MqttMessage message)
+        public void Write(MqttMessage message)
         {
             if (message == null)
                 return;
@@ -97,8 +102,9 @@ namespace RxMqtt.Client{
                     return;
                 }
 
-                var socketState = new StreamState();
-                var asyncResult = _stream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
+                var socketState = new StreamState {NetworkStream = _networkStream};
+
+                var asyncResult = _networkStream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
 
                 asyncResult.AsyncWaitHandle.WaitOne();
             }
@@ -111,12 +117,12 @@ namespace RxMqtt.Client{
             }
         }
 
-        private static void EndWrite(IAsyncResult asyncResult)
+        private void EndWrite(IAsyncResult asyncResult)
         {
             try
             {
                 var ar = (StreamState)asyncResult.AsyncState;
-                _stream.EndWrite(asyncResult);
+                ar.NetworkStream.EndWrite(asyncResult);
 
                 asyncResult.AsyncWaitHandle.WaitOne();
 

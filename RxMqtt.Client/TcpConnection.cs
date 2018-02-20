@@ -7,6 +7,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Reactive.Subjects;
 using System.Reflection;
+using System.Runtime.InteropServices.ComTypes;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
@@ -26,9 +27,11 @@ namespace RxMqtt.Client{
 
         protected static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private ReadWriteAsync _readWriteAsync;
+        //private ReadWriteAsync _readWriteAsync;
 
-        private Task _readTask;
+        private IReadWriteStream _readWriteStream;
+
+        private Thread _readThread;
 
         protected string HostName;
 
@@ -89,11 +92,10 @@ namespace RxMqtt.Client{
 
                 if (_status == Status.Initialized)
                 {
-                    _readWriteAsync = new ReadWriteAsync(ref _stream);
+                    _readWriteStream = new ReadWriteAsync(ref _networkStream);
 
-                    //_readSync = new ReadSync(ref _stream);
-
-                    _readTask = Task.Factory.StartNew(ReadLoop, TaskCreationOptions.LongRunning);
+                    _readThread = new Thread(ReadLoop) {IsBackground = true};
+                    _readThread.Start();
                 }
             }
             catch (Exception e)
@@ -113,14 +115,13 @@ namespace RxMqtt.Client{
                 _manualResetEventSlim.Wait(_cancellationToken);
                 _manualResetEventSlim.Reset();
 
-                _readWriteAsync.Read(ProcessPackets);
-                //_readAsync.Read(ProcessReadBuffer);
+                _readWriteStream.Read(ProcessPackets);
             }
         }
 
         internal void BeginWrite(MqttMessage mqttMessage)
         {
-            _readWriteAsync.Write(mqttMessage);
+            _readWriteStream.Write(mqttMessage);
         }
 
         private async Task<Status> InitializeConnection(int port = 8883)
@@ -132,7 +133,10 @@ namespace RxMqtt.Client{
                 _socket = new Socket(_ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
                 {
                     UseOnlyOverlappedIO = true,
-                    Blocking = true
+                    Blocking = true,
+                    //ReceiveBufferSize = 350000,
+                    //SendBufferSize = 350000,
+                    NoDelay = true
                 };
 
                 await _socket.ConnectAsync(new IPEndPoint(_ipAddress, port));
@@ -142,26 +146,26 @@ namespace RxMqtt.Client{
 
                 var networkStream = new NetworkStream(_socket, true);
 
-                if (_certificate != null)
-                {
-                    var sslStream = new SslStream(networkStream, false, null, null);
+                //if (_certificate != null)
+                //{
+                //    var sslStream = new SslStream(networkStream, false, null, null);
 
-                    _x509CertificateCollection = new X509CertificateCollection(new X509Certificate[] {_certificate});
+                //    _x509CertificateCollection = new X509CertificateCollection(new X509Certificate[] {_certificate});
 
-                    await sslStream.AuthenticateAsClientAsync(HostName, _x509CertificateCollection, SslProtocols.Tls12, true);
+                //    await sslStream.AuthenticateAsClientAsync(HostName, _x509CertificateCollection, SslProtocols.Tls12, true);
 
-                    _stream = sslStream;
+                //    _networkStream = sslStream;
 
-                    if (!sslStream.IsAuthenticated || !sslStream.IsEncrypted || !sslStream.IsMutuallyAuthenticated)
-                    {
-                        _logger.Log(LogLevel.Trace, "SSL Authentication failed");
-                        return Status.SslError;
-                    }
-                }
-                else
-                {
-                    _stream = networkStream;
-                }
+                //    if (!sslStream.IsAuthenticated || !sslStream.IsEncrypted || !sslStream.IsMutuallyAuthenticated)
+                //    {
+                //        _logger.Log(LogLevel.Trace, "SSL Authentication failed");
+                //        return Status.SslError;
+                //    }
+                //}
+                //else
+                //{
+                    _networkStream = networkStream;
+                //}
 
                 status = Status.Initialized;
             }
@@ -176,6 +180,9 @@ namespace RxMqtt.Client{
         {
             foreach (var nextBuffer in Utilities.ParseReadBuffer(buffer))
             {
+                if (nextBuffer == null)
+                    break;
+
                 var msgType = (MsgType)(byte)((nextBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
                 _logger.Log(LogLevel.Info, $"In <= {msgType}");
@@ -186,7 +193,8 @@ namespace RxMqtt.Client{
                         var msg = new Publish(nextBuffer);
                         PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
 
-                        _readWriteAsync.Write(new PublishAck(msg.PacketId));
+                        //_readWriteAsync.Write(new PublishAck(msg.PacketId));
+                        _readWriteStream.Write(new PublishAck(msg.PacketId));
                         break;
                     case MsgType.ConnectAck:
                         PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
@@ -212,7 +220,7 @@ namespace RxMqtt.Client{
         #region PrivateFields
 
         private static Socket _socket;
-        private static Stream _stream;
+        private static NetworkStream _networkStream;
         private readonly string _pfxFileName;
         private readonly string _certPassword;
 

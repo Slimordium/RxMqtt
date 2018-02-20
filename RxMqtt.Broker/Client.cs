@@ -6,6 +6,7 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using NLog;
+using RxMqtt.Client;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
@@ -15,9 +16,9 @@ namespace RxMqtt.Broker
     {
         private string _clientId;
 
-        private readonly Socket _socket;
+        private readonly NetworkStream _networkStream;
 
-        private static ILogger _logger = LogManager.GetCurrentClassLogger();
+        private ILogger _logger = LogManager.GetCurrentClassLogger();
 
         private readonly List<string> _subscriptions = new List<string>();
 
@@ -31,54 +32,48 @@ namespace RxMqtt.Broker
 
         private long _shouldCancel;
 
-        internal  Client(Socket socket, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
+        private readonly AutoResetEvent _publishThrottleEvent = new AutoResetEvent(true);
+
+        private readonly IReadWriteStream _readWriteStream;
+
+        private readonly Thread _readThread;
+
+        internal  Client(ref NetworkStream _networkStream, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
         {
             _cancellationTokenSource = cancellationTokenSource;
-            _socket = socket;
+            this._networkStream = _networkStream;
             _brokerPublishSubject = brokerPublishSubject;
 
-            BeginReceive();
+            _readWriteStream = new ReadWriteAsync(ref _networkStream);
+
+            _readThread = new Thread(() =>
+            {
+                while (!_cancellationTokenSource.IsCancellationRequested)
+                {
+                    _publishThrottleEvent.WaitOne();
+                    _publishThrottleEvent.Reset();
+
+                    _readWriteStream.Read(ProcessPackets);
+                }
+            }) {IsBackground = true};
+            _readThread.Start();
+        }
+
+        private void ReadLoop()
+        {
+            while (!_cancellationTokenSource.IsCancellationRequested)
+            {
+                _publishThrottleEvent.WaitOne();
+                _publishThrottleEvent.Reset();
+
+                _readWriteStream.Read(ProcessPackets);
+            }
         }
 
         private void OnNextPublish(Publish mqttMessage)
         {
-            //This sends the message to the client attached to this socket
-            BeginSend(mqttMessage);
-        }
-
-        private void BeginReceive()
-        {
-            var rs = new ReceiveState {Socket = _socket, Callback = ProcessPackets};
-
-            try
-            {
-                var ar = _socket.BeginReceive(rs.Buffer, 0, rs.Buffer.Length, SocketFlags.None, EndReceive, rs);
-                ar.AsyncWaitHandle.WaitOne();
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Trace, e.Message);
-            }
-        }
-
-        private static void EndReceive(IAsyncResult asyncResult)
-        {
-            try
-            {
-                var ar = (ReceiveState)asyncResult.AsyncState;
-
-                var bytesIn = ar.Socket.EndReceive(asyncResult);
-
-                var newBuffer = new byte[bytesIn];
-
-                Buffer.BlockCopy(ar.Buffer,0, newBuffer,0, bytesIn);
-
-                ar.Callback.Invoke(newBuffer);
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Trace, e.Message);
-            }
+            //This sends the message to the client attached to this _networkStream
+            _readWriteStream.Write(mqttMessage);
         }
 
         private void ProcessPackets(byte[] inBuffer)
@@ -99,9 +94,9 @@ namespace RxMqtt.Broker
                         case MsgType.Publish:
                             var publishMsg = new Publish(buffer);
 
-                            BeginSend(new PublishAck(publishMsg.PacketId));
-
                             _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
+
+                            _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
 
                             break;
                         case MsgType.Connect:
@@ -124,22 +119,21 @@ namespace RxMqtt.Broker
 
                             _logger = LogManager.GetLogger(_clientId);
 
-                            BeginSend(new ConnectAck());
+                            _readWriteStream.Write(new ConnectAck());
                             break;
                         case MsgType.PingRequest:
 
-
-                            BeginSend(new PingResponse());
+                            _readWriteStream.Write(new PingResponse());
                             break;
                         case MsgType.Subscribe:
                             var subscribeMsg = new Subscribe(buffer);
 
-                            BeginSend(new SubscribeAck(subscribeMsg.PacketId));
+                            _readWriteStream.Write(new SubscribeAck(subscribeMsg.PacketId));
 
                             Subscribe(subscribeMsg.Topics);
                             break;
                         case MsgType.PublishAck:
-
+                            _publishThrottleEvent.Set(); //Throttling of sorts...
                             break;
                         case MsgType.Disconnect:
 
@@ -156,8 +150,6 @@ namespace RxMqtt.Broker
             }
 
             Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
-
-            BeginReceive();
         }
 
         private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic
@@ -174,48 +166,15 @@ namespace RxMqtt.Broker
                 if (topic.EndsWith("#"))
                 {
                     var newtopic = topic.Replace("#", "");
-                    _subscriptionDisposables.Add(_brokerPublishSubject.SubscribeOn(Scheduler.Default).Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish));
                 }
                 else
                 {
-                    _subscriptionDisposables.Add(_brokerPublishSubject
-                                .Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic))
-                                .SubscribeOn(Scheduler.Default)
-                                .Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNextPublish));
                 }
                 
                 _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
             }
-        }
-
-        private void BeginSend(MqttMessage message)
-        {
-            _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}'");
-
-            try
-            {
-                if (!_socket.Connected)
-                    return;
-
-                var buffer = message.GetBytes();
-
-                var ar = _socket.BeginSend(buffer, 0, buffer.Length, SocketFlags.None, EndSend, new SendState {Socket = _socket});
-
-                ar.AsyncWaitHandle.WaitOne();
-
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, $"BeginSend => '{e.Message}'");
-            }
-        }
-
-        private static void EndSend(IAsyncResult asyncResult)
-        {
-            var state = (SendState) asyncResult.AsyncState;
-
-            state.Socket.EndSend(asyncResult);
-            asyncResult.AsyncWaitHandle.WaitOne();
         }
     }
 

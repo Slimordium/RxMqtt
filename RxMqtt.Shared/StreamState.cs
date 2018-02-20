@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Net.Sockets;
 
-namespace RxMqtt.Client{
+namespace RxMqtt.Shared
+{
     internal class StreamState : IDisposable
     {
         public byte[] Buffer { get; set; } = new byte[300000];
@@ -9,23 +11,15 @@ namespace RxMqtt.Client{
 
         public Action<byte[]> CallBack { get; set; }
 
-        ~StreamState()
-        {
-            Dispose(false);
-        }
-
-        private void ReleaseUnmanagedResources()
-        {
-            Buffer = null;
-            CallBack = null;
-        }
+        public NetworkStream NetworkStream { get; set; }
 
         private void Dispose(bool disposing)
         {
-            ReleaseUnmanagedResources();
-            if (disposing)
-            {
-            }
+            if (!disposing) return;
+
+            Buffer = null;
+            CallBack = null;
+            NetworkStream = null;
         }
 
         public void Dispose()

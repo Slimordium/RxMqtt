@@ -4,13 +4,14 @@ using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
-namespace RxMqtt.Client{
-    internal class ReadSync
+namespace RxMqtt.Shared
+{
+    internal class ReadWriteSync : IReadWriteStream
     {
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private readonly Stream _stream;
 
-        internal ReadSync(ref Stream stream)
+        internal ReadWriteSync(ref Stream stream)
         {
             _stream = stream;
         }
@@ -19,7 +20,7 @@ namespace RxMqtt.Client{
         /// Reads single packet (usually). This is a inefficent was to do things...
         /// </summary>
         /// <returns></returns>
-        internal byte[] Read()
+        public void Read(Action<byte[]> callback)
         {
             if (_stream == null)
                 throw new ArgumentNullException("ReadSync stream is null");
@@ -32,7 +33,7 @@ namespace RxMqtt.Client{
                 var bytesIn = _stream.Read(buffer, 0, 2);
 
                 if (bytesIn == 0 || buffer[0] == 0x00)
-                    return null;
+                    return;
 
                 var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
@@ -44,7 +45,8 @@ namespace RxMqtt.Client{
 
                     Buffer.BlockCopy(buffer, 0, rBuffer, 0, 2);
 
-                    return rBuffer;
+                    callback.Invoke(rBuffer);
+                    return;
                 }
 
                 bytesIn += _stream.Read(buffer, 2, 3);
@@ -57,7 +59,9 @@ namespace RxMqtt.Client{
                 {
                     newBuffer = new byte[packetLength];
                     Buffer.BlockCopy(buffer, 0, newBuffer, 0, packetLength);
-                    return newBuffer;
+
+                    callback.Invoke(newBuffer);
+                    return;
                 }
 
                 _stream.Read(buffer, 5, packetLength);
@@ -71,7 +75,15 @@ namespace RxMqtt.Client{
                 _logger.Log(LogLevel.Error, e.Message);    
             }
 
-            return newBuffer;
+            callback.Invoke(newBuffer);
+            return;
+        }
+
+        public void Write(MqttMessage message)
+        {
+            var buffer = message.GetBytes();
+
+            _stream.Write(buffer, 0, buffer.Length);
         }
     }
 }

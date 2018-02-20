@@ -106,10 +106,6 @@ namespace RxMqtt.Client
                                     if (envelope.PacketId != messageToPublish.PacketId)
                                         return true;
 
-                                    Console.WriteLine($"Publish - {messageToPublish.PacketId}");
-
-                                    Console.WriteLine($"{envelope.MsgType} - {envelope.PacketId}");
-
                                     return false;
                                 })
                                 .Take(1);

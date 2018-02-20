@@ -72,7 +72,7 @@ namespace RxMqtt.Broker
             _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}:{_port}'");
 
             _ipEndPoint = new IPEndPoint(_ipAddress, _port);
-            var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { UseOnlyOverlappedIO = true };
+            var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp);//
 
             listener.Bind(_ipEndPoint);
             listener.Listen(20);
@@ -104,7 +104,8 @@ namespace RxMqtt.Broker
             socket.Blocking = true;
             socket.ReceiveBufferSize = 300000;
             socket.SendBufferSize = 300000;
-            
+            //socket.NoDelay = true;
+
             var cuid = Guid.NewGuid();
             var cts = new CancellationTokenSource();
             cts.Token.Register(() =>
@@ -114,7 +115,9 @@ namespace RxMqtt.Broker
 
             _cancellationTokenSources.Add(cts);
 
-            _clients.Add(cuid, new Client(socket, ref _publishSyncSubject, ref cts));
+            var networkStream = new NetworkStream(socket);
+
+            _clients.Add(cuid, new Client(ref networkStream, ref _publishSyncSubject, ref cts));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 
