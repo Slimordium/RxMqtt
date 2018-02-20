@@ -30,6 +30,7 @@ namespace RxMqtt.Client
             string connectionId,
             string brokerHostname,
             int port,
+            CancellationToken cancellationToken,
             int keepAliveInSeconds = 1200,
             string pfxFileName = "",
             string pfxPassword = "")
@@ -39,16 +40,20 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"MQTT Client {connectionId}, {brokerHostname}");
 
+            _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
             //TODO: Allow use of websocket connection instead of TCP
             _connection = new TcpConnection(
                 connectionId,
                 brokerHostname,
                 keepAliveInSeconds,
                 port,
+                ref _cancellationTokenSource,
                 pfxFileName,
                 pfxPassword);
         }
 
+        private readonly CancellationTokenSource _cancellationTokenSource;
     
         #region PrivateFields
 

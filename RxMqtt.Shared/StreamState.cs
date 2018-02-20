@@ -9,8 +9,6 @@ namespace RxMqtt.Shared
 
         public int BytesIn { get; set; }
 
-        public Action<byte[]> CallBack { get; set; }
-
         public NetworkStream NetworkStream { get; set; }
 
         private void Dispose(bool disposing)
@@ -18,7 +16,6 @@ namespace RxMqtt.Shared
             if (!disposing) return;
 
             Buffer = null;
-            CallBack = null;
             NetworkStream = null;
         }
 

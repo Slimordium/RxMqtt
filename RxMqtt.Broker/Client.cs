@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.Sockets;
-using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using NLog;
-using RxMqtt.Client;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
@@ -32,112 +30,96 @@ namespace RxMqtt.Broker
 
         private long _shouldCancel;
 
-        private readonly AutoResetEvent _publishThrottleEvent = new AutoResetEvent(true);
-
         private readonly IReadWriteStream _readWriteStream;
 
-        private readonly Thread _readThread;
-
-        internal  Client(ref NetworkStream _networkStream, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
+        internal  Client(NetworkStream networkStream, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
         {
             _cancellationTokenSource = cancellationTokenSource;
-            this._networkStream = _networkStream;
+            _networkStream = networkStream;
             _brokerPublishSubject = brokerPublishSubject;
 
-            _readWriteStream = new ReadWriteAsync(ref _networkStream);
+            _readWriteStream = new ReadWriteAsync(ref _networkStream, ProcessPackets, ref cancellationTokenSource, ref _logger);
 
-            _readThread = new Thread(ReadLoop) {IsBackground = true};
-            _readThread.Start();
-        }
-
-        private void ReadLoop()
-        {
-            while (!_cancellationTokenSource.IsCancellationRequested)
+            cancellationTokenSource.Token.Register(() =>
             {
-                _readWriteStream.Read(ProcessPackets);
-            }
+                foreach (var disposable in _subscriptionDisposables)
+                {
+                    disposable.Dispose();
+                }
+            });
         }
 
         private void OnNextPublish(Publish mqttMessage)
         {
-            _publishThrottleEvent.WaitOne();
-            _publishThrottleEvent.Reset();
-
             //This sends the message to the client attached to this _networkStream
             _readWriteStream.Write(mqttMessage);
         }
 
-        private void ProcessPackets(byte[] inBuffer)
+        private void ProcessPackets(byte[] buffer)
         {
-            foreach (var buffer in Utilities.ParseReadBuffer(inBuffer))
+            if (buffer.Length == 0)
+                return;
+
+            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+
+            try
             {
-                if (buffer == null || buffer.Length < 2)
-                    break;
+                _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
-                var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
-
-                try
+                switch (msgType)
                 {
-                    _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
+                    case MsgType.Publish:
+                        var publishMsg = new Publish(buffer);
 
-                    switch (msgType)
-                    {
-                        case MsgType.Publish:
-                            var publishMsg = new Publish(buffer);
+                        _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
 
-                            _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
+                        _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
 
-                            _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
+                        break;
+                    case MsgType.Connect:
+                        var connectMsg = new Connect(buffer);
 
-                            break;
-                        case MsgType.Connect:
-                            var connectMsg = new Connect(buffer);
+                        _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
-                            _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
+                        _clientId = connectMsg.ClientId;
 
-                            _clientId = connectMsg.ClientId;
+                        _keepAliveDisposable?.Dispose();
 
-                            _keepAliveDisposable?.Dispose();
+                        _keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
+                        {
+                            if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
 
-                            _keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
-                            {
-                                if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
+                            _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
 
-                                _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
+                            _cancellationTokenSource.Cancel(false);
+                        });
 
-                                _cancellationTokenSource.Cancel(false);
-                            });
+                        _logger = LogManager.GetLogger(_clientId);
 
-                            _logger = LogManager.GetLogger(_clientId);
+                        _readWriteStream.Write(new ConnectAck());
+                        break;
+                    case MsgType.PingRequest:
 
-                            _readWriteStream.Write(new ConnectAck());
-                            break;
-                        case MsgType.PingRequest:
+                        _readWriteStream.Write(new PingResponse());
+                        break;
+                    case MsgType.Subscribe:
+                        var subscribeMsg = new Subscribe(buffer);
 
-                            _readWriteStream.Write(new PingResponse());
-                            break;
-                        case MsgType.Subscribe:
-                            var subscribeMsg = new Subscribe(buffer);
+                        _readWriteStream.Write(new SubscribeAck(subscribeMsg.PacketId));
 
-                            _readWriteStream.Write(new SubscribeAck(subscribeMsg.PacketId));
-
-                            Subscribe(subscribeMsg.Topics);
-                            break;
-                        case MsgType.PublishAck:
-                            _publishThrottleEvent.Set(); //Throttling of sorts...
-                            break;
-                        case MsgType.Disconnect:
-
-                            break;
-                        default:
-                            _logger.Log(LogLevel.Warn, $"Ignoring message");
-                            break;
-                    }
+                        Subscribe(subscribeMsg.Topics);
+                        break;
+                    case MsgType.PublishAck:
+                    case MsgType.Disconnect:
+                        break;
+                    default:
+                        _logger.Log(LogLevel.Warn, $"Ignoring message");
+                        break;
                 }
-                catch (Exception e)
-                {
-                    _logger.Log(LogLevel.Error, $"ProcessRead error '{e.Message}'");
-                }
+            }
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Error, $"ProcessRead error '{e.Message}'");
             }
 
             Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages

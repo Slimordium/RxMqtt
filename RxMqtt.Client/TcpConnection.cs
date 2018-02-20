@@ -25,15 +25,13 @@ namespace RxMqtt.Client{
 
         protected ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
 
-        protected static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+        protected ILogger _logger = LogManager.GetCurrentClassLogger();
 
         private IReadWriteStream _readWriteStream;
 
-        private Thread _readThread;
-
         protected string HostName;
 
-        private CancellationToken _cancellationToken = new CancellationToken();
+        private CancellationTokenSource _cancellationTokenSource;
 
         internal TcpConnection
         (
@@ -41,11 +39,14 @@ namespace RxMqtt.Client{
             string hostName,
             int keepAliveInSeconds,
             int port,
+            ref CancellationTokenSource cancellationTokenSource,
             string certFileName = "",
             string pfxPw = ""
         )
         {
             PacketSyncSubject = Subject.Synchronize(_packetSyncSubject);
+
+            _cancellationTokenSource = cancellationTokenSource;
 
             _keepAliveInSeconds = (ushort) keepAliveInSeconds;
             _connectionId = connectionId;
@@ -88,10 +89,7 @@ namespace RxMqtt.Client{
 
                 if (_status == Status.Initialized)
                 {
-                    _readWriteStream = new ReadWriteAsync(ref _networkStream);
-
-                    _readThread = new Thread(ReadLoop) {IsBackground = true};
-                    _readThread.Start();
+                    _readWriteStream = new ReadWriteAsync(ref _networkStream, ProcessPackets, ref _cancellationTokenSource, ref _logger);
                 }
             }
             catch (Exception e)
@@ -102,14 +100,6 @@ namespace RxMqtt.Client{
             }
 
             return _status;
-        }
-
-        private void ReadLoop()
-        {
-            while (!_cancellationToken.IsCancellationRequested)
-            {
-                _readWriteStream.Read(ProcessPackets);
-            }
         }
 
         internal void Write(MqttMessage mqttMessage)
@@ -127,9 +117,6 @@ namespace RxMqtt.Client{
                 {
                     UseOnlyOverlappedIO = true,
                     Blocking = true,
-                    //ReceiveBufferSize = 350000,
-                    //SendBufferSize = 350000,
-                    NoDelay = true
                 };
 
                 await _socket.ConnectAsync(new IPEndPoint(_ipAddress, port));
@@ -169,42 +156,32 @@ namespace RxMqtt.Client{
 
             return status;
         }
-        private void ProcessPackets(byte[] buffer) 
+        private void ProcessPackets(byte[] nextBuffer) 
         {
-            foreach (var nextBuffer in Utilities.ParseReadBuffer(buffer))
+            if (nextBuffer == null)
+                return;
+
+            var msgType = (MsgType)(byte)((nextBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+
+            _logger.Log(LogLevel.Info, $"In <= {msgType}");
+
+            switch (msgType)
             {
-                if (nextBuffer == null)
+                case MsgType.Publish:
+                    var msg = new Publish(nextBuffer);
+                    PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
+                    _readWriteStream.Write(new PublishAck(msg.PacketId));
                     break;
+                case MsgType.ConnectAck:
+                    PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
+                    break;
+                case MsgType.PingResponse:
+                    break;
+                case MsgType.PublishAck:
+                    var pubAck = new PublishAck(nextBuffer.ToArray());
 
-                var msgType = (MsgType)(byte)((nextBuffer[0] & 0xf0) >> (byte)MsgOffset.Type);
-
-                _logger.Log(LogLevel.Info, $"In <= {msgType}");
-
-                switch (msgType)
-                {
-                    case MsgType.Publish:
-                        var msg = new Publish(nextBuffer);
-                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
-
-                        //_readWriteAsync.Write(new PublishAck(msg.PacketId));
-                        _readWriteStream.Write(new PublishAck(msg.PacketId));
-                        break;
-                    case MsgType.ConnectAck:
-                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
-                        break;
-                    case MsgType.PingResponse:
-                        break;
-                    case MsgType.PublishAck:
-                        var pubAck = new PublishAck(nextBuffer.ToArray());
-
-                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
-                        break;
-                    default:
-                        //var msgId = MqttMessage.BytesToUshort(new[] { buffer[2], buffer[3] });
-
-                        //_ackSubject.OnNext(new Tuple<MsgType, int>(msgType, msgId));
-                        break;
-                }
+                    PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
+                    break;
             }
         }
 

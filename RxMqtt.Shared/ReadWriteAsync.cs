@@ -1,41 +1,55 @@
 ﻿using System;
-using System.IO;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
 using System.Threading;
 using NLog;
-using RxMqtt.Client;
-using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared
 {
     internal class ReadWriteAsync : IReadWriteStream
     {
-
-        private readonly AutoResetEvent _readAutoResetEvent = new AutoResetEvent(false);
-        private readonly AutoResetEvent _writeAutoResetEvent = new AutoResetEvent(false);
-
-        private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+        private readonly ILogger _logger;
         private readonly NetworkStream _networkStream;
-
-        internal ReadWriteAsync(ref NetworkStream networkStream)
-        {
-            _networkStream = networkStream;
-        }
+        private readonly BlockingCollection<byte[]> _blockingCollection = new BlockingCollection<byte[]>();
+        private readonly Action<byte[]> _callback;
+        private readonly Thread _queueProcessorThread;
+        private readonly CancellationTokenSource _cancellationTokenSourceSource;
 
         /// <summary>
-        /// Will most likely read several packets when incoming traffic is high
+        /// Complete messages will be passed to callback. If a read contains multiple messages, or partial messages, they will be assembled before the callback is invoked
         /// </summary>
+        /// <param name="networkStream"></param>
         /// <param name="callback"></param>
-        public void Read(Action<byte[]> callback)
+        /// <param name="cancellationTokenSource"></param>
+        /// <param name="logger"></param>
+        internal ReadWriteAsync(ref NetworkStream networkStream, Action<byte[]> callback, ref CancellationTokenSource cancellationTokenSource, ref ILogger logger)
+        {
+            _logger = logger;
+            _cancellationTokenSourceSource = cancellationTokenSource;
+            _networkStream = networkStream;
+            _callback = callback;
+
+            _queueProcessorThread = new Thread(ParseMessagesFromQueue) {IsBackground = true};
+            _queueProcessorThread.Start();
+
+            _cancellationTokenSourceSource.Token.Register(() =>
+            {
+                _blockingCollection.CompleteAdding();
+            });
+
+            Read();
+        }
+
+        private void Read()
         {
             try
             {
-                var state = new StreamState { CallBack = callback, NetworkStream = _networkStream};
+                var state = new StreamState { NetworkStream = _networkStream}; //Important to pass the stream in this manner
 
                 _networkStream.BeginRead(state.Buffer, 0, state.Buffer.Length, EndRead, state);
-
-                _readAutoResetEvent.WaitOne();
             }
             catch (ObjectDisposedException)
             {
@@ -50,19 +64,17 @@ namespace RxMqtt.Shared
         {
             try
             {
-                byte[] newBuffer = null;
-
-                var asyncState = (StreamState)asyncResult.AsyncState;
+                var asyncState = (StreamState)asyncResult.AsyncState; //Important to pass the stream in this manner
                 var bytesIn = asyncState.NetworkStream.EndRead(asyncResult);
 
                 if (bytesIn > 0)
                 {
-                    newBuffer = new byte[bytesIn];
+                    var newBuffer = new byte[bytesIn];
 
                     Buffer.BlockCopy(asyncState.Buffer, 0, newBuffer, 0, bytesIn);
-                }
 
-                asyncState.CallBack.Invoke(newBuffer);
+                    _blockingCollection.Add(newBuffer);
+                }
 
                 asyncState.Dispose();
             }
@@ -73,9 +85,13 @@ namespace RxMqtt.Shared
             catch (Exception e)
             {
                 _logger.Log(LogLevel.Error, e.Message);
+
+                _cancellationTokenSourceSource.Cancel();
+                return;
             }
 
-            _readAutoResetEvent.Set();
+            if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                Read();
         }
 
         public void Write(MqttMessage message)
@@ -95,7 +111,7 @@ namespace RxMqtt.Shared
                     return;
                 }
 
-                var socketState = new StreamState {NetworkStream = _networkStream};
+                var socketState = new StreamState { NetworkStream = _networkStream };
 
                 _networkStream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
             }
@@ -105,9 +121,10 @@ namespace RxMqtt.Shared
             catch (Exception e)
             {
                 _logger.Log(LogLevel.Error, e.Message);
-            }
 
-            _writeAutoResetEvent.WaitOne();
+                if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                    _cancellationTokenSourceSource.Cancel();
+            }
         }
 
         private void EndWrite(IAsyncResult asyncResult)
@@ -121,10 +138,71 @@ namespace RxMqtt.Shared
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, e);
-            }
+                _logger.Log(LogLevel.Error, e.Message);
 
-            _writeAutoResetEvent.Set();
+                if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                    _cancellationTokenSourceSource.Cancel();
+            }
         }
+
+        private void ParseMessagesFromQueue()
+        {
+            var packetBytes = new List<byte>();
+            var remaining = 0;
+
+            foreach (var buffer in _blockingCollection.GetConsumingEnumerable())
+            {
+                while (!_cancellationTokenSourceSource.IsCancellationRequested)
+                {
+                    if (remaining > 0 && buffer.Length >= remaining)
+                    {
+                        packetBytes.AddRange(buffer.Take(remaining));
+                        _callback.Invoke(packetBytes.ToArray());
+                    }
+
+                    if (remaining > 0 && buffer.Length - remaining == 0)
+                    {
+                        remaining = 0;
+                        packetBytes = new List<byte>();
+                        break;
+                    }
+
+                    var msg = GetSingleMessage(buffer.Skip(remaining).Take(buffer.Length - remaining).ToArray());
+
+                    if (msg.Item2 > 0)
+                    {
+                        packetBytes.AddRange(msg.Item1);
+                        remaining = msg.Item2;
+                        break;
+                    }
+
+                    if (packetBytes.Count > 0)
+                    {
+                        _callback.Invoke(packetBytes.ToArray());
+                    }
+                    else
+                        _callback.Invoke(buffer);
+
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Either returns a complete packet with the bool set to true, or a partial packet with the bool set to false
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <returns></returns>
+        private static Tuple<byte[], int> GetSingleMessage(byte[] buffer)
+        {
+            var decodeValue = MqttMessage.DecodeValue(buffer, 1);
+            var packetLength = decodeValue.Item1 + decodeValue.Item2 + 1;
+
+            if (packetLength > buffer.Length)
+                return new Tuple<byte[], int>(buffer, packetLength - buffer.Length);
+
+            return new Tuple<byte[], int>(buffer, 0); ;
+        }
+
     }
 }

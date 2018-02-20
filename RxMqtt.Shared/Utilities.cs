@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared{
-    internal static class Utilities{
+    internal static class Utilities
+    {
         internal static IEnumerable<byte[]> ParseReadBuffer(byte[] buffer)
         {
             var startIndex = 0;
@@ -14,10 +15,6 @@ namespace RxMqtt.Shared{
             {
                 while (startIndex < buffer.Length)
                 {
-                    if (startIndex + 1 >= buffer.Length)
-                    {
-                        break;
-                    }
 
                     decodeValue = MqttMessage.DecodeValue(buffer, startIndex + 1);
 

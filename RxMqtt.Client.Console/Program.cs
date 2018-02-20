@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace RxMqtt.Client.Console
@@ -25,7 +26,7 @@ namespace RxMqtt.Client.Console
             if (string.IsNullOrEmpty(ip))
                 ip = "127.0.0.1";
 
-            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883); // "172.16.0.244"
+            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883, CancellationToken.None); // "172.16.0.244"
 
             _mqttClient.InitializeAsync().Wait();
 
@@ -82,7 +83,14 @@ namespace RxMqtt.Client.Console
 
         private static async Task Publish(string msg, string topic, string count)
         {
-            for (var i = 1; i <= Convert.ToInt32(count); i++)
+            int parsedCount;
+
+            if (!int.TryParse(count, out parsedCount))
+            {
+                parsedCount = 1;
+            }
+
+            for (var i = 1; i <= parsedCount; i++)
             {
                 try
                 {
