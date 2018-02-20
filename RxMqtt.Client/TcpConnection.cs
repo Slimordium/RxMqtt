@@ -27,8 +27,6 @@ namespace RxMqtt.Client{
 
         protected static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        //private ReadWriteAsync _readWriteAsync;
-
         private IReadWriteStream _readWriteStream;
 
         private Thread _readThread;
@@ -36,8 +34,6 @@ namespace RxMqtt.Client{
         protected string HostName;
 
         private CancellationToken _cancellationToken = new CancellationToken();
-
-        private ManualResetEventSlim _manualResetEventSlim = new ManualResetEventSlim(true);
 
         internal TcpConnection
         (
@@ -112,14 +108,11 @@ namespace RxMqtt.Client{
         {
             while (!_cancellationToken.IsCancellationRequested)
             {
-                _manualResetEventSlim.Wait(_cancellationToken);
-                _manualResetEventSlim.Reset();
-
                 _readWriteStream.Read(ProcessPackets);
             }
         }
 
-        internal void BeginWrite(MqttMessage mqttMessage)
+        internal void Write(MqttMessage mqttMessage)
         {
             _readWriteStream.Write(mqttMessage);
         }
@@ -213,8 +206,6 @@ namespace RxMqtt.Client{
                         break;
                 }
             }
-
-            _manualResetEventSlim.Set();
         }
 
         #region PrivateFields

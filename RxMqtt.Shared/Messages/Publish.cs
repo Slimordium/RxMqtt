@@ -70,7 +70,7 @@ namespace RxMqtt.Shared.Messages
 
                 Message = new byte[messageLength]; //topicLength - (2 for packet ID) - (2 for topic length) - (1 for payload type)
 
-                if (messageLength < buffer.Length - messageStartIndex)
+                if (messageLength < buffer.Length)
                 {
                     Buffer.BlockCopy(buffer, messageStartIndex, Message, 0, buffer.Length - messageStartIndex);
                 }

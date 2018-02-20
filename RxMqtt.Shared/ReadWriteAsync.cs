@@ -12,8 +12,9 @@ namespace RxMqtt.Shared
     internal class ReadWriteAsync : IReadWriteStream
     {
 
-        private readonly ManualResetEventSlim _readEvent = new ManualResetEventSlim(true); //Not sure if this will be needed
-        private readonly ManualResetEventSlim _writeEvent = new ManualResetEventSlim(true);//Not sure if this will be needed
+        private readonly AutoResetEvent _readAutoResetEvent = new AutoResetEvent(false);
+        private readonly AutoResetEvent _writeAutoResetEvent = new AutoResetEvent(false);
+
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private readonly NetworkStream _networkStream;
 
@@ -28,16 +29,13 @@ namespace RxMqtt.Shared
         /// <param name="callback"></param>
         public void Read(Action<byte[]> callback)
         {
-            _readEvent.Wait();
-            _readEvent.Reset();
-
             try
             {
                 var state = new StreamState { CallBack = callback, NetworkStream = _networkStream};
 
-                var asyncResult = _networkStream.BeginRead(state.Buffer, 0, state.Buffer.Length, EndRead, state);
+                _networkStream.BeginRead(state.Buffer, 0, state.Buffer.Length, EndRead, state);
 
-                asyncResult.AsyncWaitHandle.WaitOne();
+                _readAutoResetEvent.WaitOne();
             }
             catch (ObjectDisposedException)
             {
@@ -56,8 +54,6 @@ namespace RxMqtt.Shared
 
                 var asyncState = (StreamState)asyncResult.AsyncState;
                 var bytesIn = asyncState.NetworkStream.EndRead(asyncResult);
-
-                asyncResult.AsyncWaitHandle.WaitOne();
 
                 if (bytesIn > 0)
                 {
@@ -79,16 +75,13 @@ namespace RxMqtt.Shared
                 _logger.Log(LogLevel.Error, e.Message);
             }
 
-            _readEvent.Set();
+            _readAutoResetEvent.Set();
         }
 
         public void Write(MqttMessage message)
         {
             if (message == null)
                 return;
-
-            _writeEvent.Wait();
-            _writeEvent.Reset();
 
             _logger.Log(LogLevel.Trace, $"Out => {message.MsgType}");
 
@@ -104,9 +97,7 @@ namespace RxMqtt.Shared
 
                 var socketState = new StreamState {NetworkStream = _networkStream};
 
-                var asyncResult = _networkStream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
-
-                asyncResult.AsyncWaitHandle.WaitOne();
+                _networkStream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
             }
             catch (ObjectDisposedException)
             {
@@ -115,6 +106,8 @@ namespace RxMqtt.Shared
             {
                 _logger.Log(LogLevel.Error, e.Message);
             }
+
+            _writeAutoResetEvent.WaitOne();
         }
 
         private void EndWrite(IAsyncResult asyncResult)
@@ -124,8 +117,6 @@ namespace RxMqtt.Shared
                 var ar = (StreamState)asyncResult.AsyncState;
                 ar.NetworkStream.EndWrite(asyncResult);
 
-                asyncResult.AsyncWaitHandle.WaitOne();
-
                 ar.Dispose();
             }
             catch (Exception e)
@@ -133,7 +124,7 @@ namespace RxMqtt.Shared
                 _logger.Log(LogLevel.Error, e);
             }
 
-            _writeEvent.Set();
+            _writeAutoResetEvent.Set();
         }
     }
 }

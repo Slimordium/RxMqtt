@@ -79,7 +79,7 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"KeepAliveSeconds => {_keepAliveInSeconds}");
 
-            _connection.BeginWrite(new Connect(_connectionId, _keepAliveInSeconds));
+            _connection.Write(new Connect(_connectionId, _keepAliveInSeconds));
 
             _keepAliveTimer = new Timer(Ping);
             
@@ -95,7 +95,7 @@ namespace RxMqtt.Client
                 Topic = topic,
                 Message = Encoding.UTF8.GetBytes(message)
             };
-            _connection.BeginWrite(messageToPublish);
+            _connection.Write(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
                                 .SkipWhile(envelope =>
@@ -145,7 +145,7 @@ namespace RxMqtt.Client
                         callback.Invoke(Encoding.UTF8.GetString(msg.Message)); 
                     }));
 
-            _connection.BeginWrite(new Subscribe(_disposables.Keys.ToArray()));
+            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
         }
 
         public void Unsubscribe(string topic)
@@ -156,7 +156,7 @@ namespace RxMqtt.Client
 
             _disposables.Remove(topic);
 
-            _connection.BeginWrite(new Unsubscribe(new []{topic}));
+            _connection.Write(new Unsubscribe(new []{topic}));
         }
 
         #endregion
@@ -167,7 +167,7 @@ namespace RxMqtt.Client
         {
             _logger.Log(LogLevel.Trace, "Ping");
 
-            _connection.BeginWrite(new PingMsg());
+            _connection.Write(new PingMsg());
         }
 
         private void ResetKeepAliveTimer(MqttMessage mqttMessage)

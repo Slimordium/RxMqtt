@@ -46,16 +46,7 @@ namespace RxMqtt.Broker
 
             _readWriteStream = new ReadWriteAsync(ref _networkStream);
 
-            _readThread = new Thread(() =>
-            {
-                while (!_cancellationTokenSource.IsCancellationRequested)
-                {
-                    _publishThrottleEvent.WaitOne();
-                    _publishThrottleEvent.Reset();
-
-                    _readWriteStream.Read(ProcessPackets);
-                }
-            }) {IsBackground = true};
+            _readThread = new Thread(ReadLoop) {IsBackground = true};
             _readThread.Start();
         }
 
@@ -63,15 +54,15 @@ namespace RxMqtt.Broker
         {
             while (!_cancellationTokenSource.IsCancellationRequested)
             {
-                _publishThrottleEvent.WaitOne();
-                _publishThrottleEvent.Reset();
-
                 _readWriteStream.Read(ProcessPackets);
             }
         }
 
         private void OnNextPublish(Publish mqttMessage)
         {
+            _publishThrottleEvent.WaitOne();
+            _publishThrottleEvent.Reset();
+
             //This sends the message to the client attached to this _networkStream
             _readWriteStream.Write(mqttMessage);
         }
