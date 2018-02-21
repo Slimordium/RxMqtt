@@ -38,7 +38,7 @@ namespace RxMqtt.Broker
             _networkStream = networkStream;
             _brokerPublishSubject = brokerPublishSubject;
 
-            _readWriteStream = new ReadWriteAsync(ref _networkStream, ProcessPackets, ref cancellationTokenSource, ref _logger);
+            _readWriteStream = new ReadWriteStream(ref _networkStream, ProcessPackets, ref cancellationTokenSource, ref _logger);
 
             cancellationTokenSource.Token.Register(() =>
             {

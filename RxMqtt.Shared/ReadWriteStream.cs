@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
 using System.Net.Sockets;
 using System.Threading;
 using NLog;
@@ -10,7 +8,7 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared
 {
-    internal class ReadWriteAsync : IReadWriteStream
+    internal class ReadWriteStream : IReadWriteStream
     {
         private readonly ILogger _logger;
         private readonly NetworkStream _networkStream;
@@ -27,7 +25,7 @@ namespace RxMqtt.Shared
         /// <param name="callback"></param>
         /// <param name="cancellationTokenSource"></param>
         /// <param name="logger"></param>
-        internal ReadWriteAsync(ref NetworkStream networkStream, Action<byte[]> callback, ref CancellationTokenSource cancellationTokenSource, ref ILogger logger)
+        internal ReadWriteStream(ref NetworkStream networkStream, Action<byte[]> callback, ref CancellationTokenSource cancellationTokenSource, ref ILogger logger)
         {
             _logger = logger;
             _cancellationTokenSourceSource = cancellationTokenSource;
