@@ -17,6 +17,7 @@ namespace RxMqtt.Shared
         private readonly Action<byte[]> _callback;
         private readonly Thread _queueProcessorThread;
         private readonly CancellationTokenSource _cancellationTokenSourceSource;
+        private readonly AutoResetEvent _writeAutoResetEvent = new AutoResetEvent(true);
 
         /// <summary>
         /// Complete messages will be passed to callback. If a read contains multiple messages, or partial messages, they will be assembled before the callback is invoked
@@ -94,6 +95,7 @@ namespace RxMqtt.Shared
                 Read();
         }
 
+
         public void Write(MqttMessage message)
         {
             if (message == null)
@@ -111,9 +113,14 @@ namespace RxMqtt.Shared
                     return;
                 }
 
-                var socketState = new StreamState { NetworkStream = _networkStream };
+                foreach (var segment in ArraySplit(buffer, 16384))
+                {
+                    _writeAutoResetEvent.WaitOne();
 
-                _networkStream.BeginWrite(buffer, 0, buffer.Length, EndWrite, socketState);
+                    var socketState = new StreamState { NetworkStream = _networkStream };
+
+                    _networkStream.BeginWrite(segment, 0, segment.Length, EndWrite, socketState);
+                }
             }
             catch (ObjectDisposedException)
             {
@@ -127,11 +134,34 @@ namespace RxMqtt.Shared
             }
         }
 
+        private static IEnumerable<byte[]> ArraySplit(byte[] buffer, int segmentLength)
+        {
+            var arrayLength = buffer.Length;
+            byte[] newBuffer = null;
+
+            var i = 0;
+            for (; arrayLength > (i + 1) * segmentLength; i++)
+            {
+                newBuffer = new byte[segmentLength];
+                Buffer.BlockCopy(buffer, i * segmentLength, newBuffer, 0, segmentLength);
+                yield return newBuffer;
+            }
+
+            var intBufforLeft = arrayLength - i * segmentLength;
+
+            if (intBufforLeft <= 0)
+                yield break;
+
+            newBuffer = new byte[intBufforLeft];
+            Buffer.BlockCopy(buffer, i * segmentLength, newBuffer, 0, intBufforLeft);
+            yield return newBuffer;
+        }
+
         private void EndWrite(IAsyncResult asyncResult)
         {
             try
             {
-                var ar = (StreamState)asyncResult.AsyncState;
+                var ar = (StreamState) asyncResult.AsyncState;
                 ar.NetworkStream.EndWrite(asyncResult);
 
                 ar.Dispose();
@@ -142,6 +172,10 @@ namespace RxMqtt.Shared
 
                 if (!_cancellationTokenSourceSource.IsCancellationRequested)
                     _cancellationTokenSourceSource.Cancel();
+            }
+            finally
+            {
+                _writeAutoResetEvent.Set();
             }
         }
 
@@ -156,29 +190,41 @@ namespace RxMqtt.Shared
                 {
                     var skipCount = 0;
 
-                    if (remaining > 0 && buffer.Length >= remaining)
+                    if (remaining > 0)
                     {
-                        var take = remaining;
+                        if (buffer.Length > remaining)
+                        {
+                            packetBytes.AddRange(buffer.Take(remaining));
 
-                        skipCount = take;
+                            skipCount = buffer.Length - remaining;
 
-                        packetBytes.AddRange(buffer.Take(take));
-                        _callback.Invoke(packetBytes.ToArray());
+                            remaining = 0;
+                        }
+                        else
+                        {
+                            packetBytes.AddRange(buffer);
 
-                        remaining = remaining - take;
+                            remaining = remaining - buffer.Length;
+                        }
 
                         if (remaining == 0)
+                        {
+                            _callback.Invoke(packetBytes.ToArray());
+                            remaining = 0;
                             packetBytes = new List<byte>();
+                        }
+
+                        if (skipCount == 0)
+                        {
+                            break;
+                        }
                     }
 
-                    if (remaining > 0 && buffer.Length - remaining == 0)
-                    {
-                        remaining = 0;
-                        packetBytes = new List<byte>();
-                        break;
-                    }
+                    var newBuffer = new byte[buffer.Length - skipCount];
 
-                    var msg = GetSingleMessage(buffer.Skip(skipCount).Take(buffer.Length - skipCount).ToArray());
+                    Buffer.BlockCopy(buffer, skipCount, newBuffer, 0, buffer.Length - skipCount);
+
+                    var msg = GetSingleMessage(newBuffer);
 
                     if (msg.Item2 > 0)
                     {
@@ -187,12 +233,7 @@ namespace RxMqtt.Shared
                         break;
                     }
 
-                    if (packetBytes.Count > 0)
-                    {
-                        _callback.Invoke(packetBytes.ToArray());
-                    }
-                    else
-                        _callback.Invoke(buffer);
+                    _callback.Invoke(newBuffer);
 
                     break;
                 }
@@ -214,6 +255,5 @@ namespace RxMqtt.Shared
 
             return new Tuple<byte[], int>(buffer, 0); ;
         }
-
     }
 }
