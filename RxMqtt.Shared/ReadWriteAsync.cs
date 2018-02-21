@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Net.Sockets;
 using System.Threading;
 using NLog;
@@ -95,7 +96,6 @@ namespace RxMqtt.Shared
                 Read();
         }
 
-
         public void Write(MqttMessage message)
         {
             if (message == null)
@@ -181,8 +181,9 @@ namespace RxMqtt.Shared
 
         private void ParseMessagesFromQueue()
         {
-            var packetBytes = new List<byte>();
+            byte[] packetBytes = null;
             var remaining = 0;
+            var offset = 0;
 
             foreach (var buffer in _blockingCollection.GetConsumingEnumerable())
             {
@@ -192,26 +193,28 @@ namespace RxMqtt.Shared
 
                     if (remaining > 0)
                     {
-                        if (buffer.Length > remaining)
+                        if (buffer.Length >= remaining)
                         {
-                            packetBytes.AddRange(buffer.Take(remaining));
+                            Buffer.BlockCopy(buffer, 0, packetBytes, offset, remaining);
 
                             skipCount = buffer.Length - remaining;
 
                             remaining = 0;
+                            offset = 0;
                         }
                         else
                         {
-                            packetBytes.AddRange(buffer);
+                            Buffer.BlockCopy(buffer, 0, packetBytes, offset, buffer.Length);
 
                             remaining = remaining - buffer.Length;
+
+                            offset += buffer.Length;
                         }
 
                         if (remaining == 0)
                         {
-                            _callback.Invoke(packetBytes.ToArray());
-                            remaining = 0;
-                            packetBytes = new List<byte>();
+                            _callback.Invoke(packetBytes);
+                            packetBytes = null;
                         }
 
                         if (skipCount == 0)
@@ -224,14 +227,21 @@ namespace RxMqtt.Shared
 
                     Buffer.BlockCopy(buffer, skipCount, newBuffer, 0, buffer.Length - skipCount);
 
-                    var msg = GetSingleMessage(newBuffer);
+                    remaining = GetMessageLength(ref newBuffer);
 
-                    if (msg.Item2 > 0)
+                    if (remaining - buffer.Length  > 0)
                     {
-                        packetBytes.AddRange(msg.Item1);
-                        remaining = msg.Item2;
+                        packetBytes = new byte[remaining];
+
+                        offset = buffer.Length;
+
+                        remaining -= buffer.Length;
+
+                        Buffer.BlockCopy(newBuffer, 0, packetBytes, 0, buffer.Length);
                         break;
                     }
+
+                    remaining = 0;
 
                     _callback.Invoke(newBuffer);
 
@@ -245,15 +255,10 @@ namespace RxMqtt.Shared
         /// </summary>
         /// <param name="buffer"></param>
         /// <returns></returns>
-        private static Tuple<byte[], int> GetSingleMessage(byte[] buffer)
+        private static int GetMessageLength(ref byte[] buffer)
         {
             var decodeValue = MqttMessage.DecodeValue(buffer, 1);
-            var packetLength = decodeValue.Item1 + decodeValue.Item2 + 1;
-
-            if (packetLength > buffer.Length)
-                return new Tuple<byte[], int>(buffer, packetLength - buffer.Length);
-
-            return new Tuple<byte[], int>(buffer, 0); ;
+            return decodeValue.Item1 + decodeValue.Item2 + 1;
         }
     }
 }

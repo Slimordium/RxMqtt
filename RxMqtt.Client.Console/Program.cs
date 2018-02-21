@@ -107,8 +107,14 @@ namespace RxMqtt.Client.Console
 
         private static void Handler(string s)
         {
-            //System.Console.WriteLine($"In => {s}");
-            System.Console.WriteLine($"Incoming publish, length => {s.Length}");
+            if (s.Length < 1500)
+            {
+                System.Console.WriteLine($"In => {s}");
+            }
+            else
+            {
+                System.Console.WriteLine($"In length => {s.Length}");
+            }
         } 
     }
 }
