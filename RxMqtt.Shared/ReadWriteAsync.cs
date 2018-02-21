@@ -154,10 +154,21 @@ namespace RxMqtt.Shared
             {
                 while (!_cancellationTokenSourceSource.IsCancellationRequested)
                 {
+                    var skipCount = 0;
+
                     if (remaining > 0 && buffer.Length >= remaining)
                     {
-                        packetBytes.AddRange(buffer.Take(remaining));
+                        var take = remaining;
+
+                        skipCount = take;
+
+                        packetBytes.AddRange(buffer.Take(take));
                         _callback.Invoke(packetBytes.ToArray());
+
+                        remaining = remaining - take;
+
+                        if (remaining == 0)
+                            packetBytes = new List<byte>();
                     }
 
                     if (remaining > 0 && buffer.Length - remaining == 0)
@@ -167,7 +178,7 @@ namespace RxMqtt.Shared
                         break;
                     }
 
-                    var msg = GetSingleMessage(buffer.Skip(remaining).Take(buffer.Length - remaining).ToArray());
+                    var msg = GetSingleMessage(buffer.Skip(skipCount).Take(buffer.Length - skipCount).ToArray());
 
                     if (msg.Item2 > 0)
                     {
