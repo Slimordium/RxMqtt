@@ -10,7 +10,8 @@ namespace RxMqtt.Shared
 {
     internal class ReadWriteStream : IReadWriteStream
     {
-        private readonly ILogger _logger;
+        private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+        private readonly int _bufferLength;
         private readonly NetworkStream _networkStream;
         private readonly BlockingCollection<byte[]> _blockingCollection = new BlockingCollection<byte[]>();
         private readonly Action<byte[]> _callback;
@@ -25,12 +26,12 @@ namespace RxMqtt.Shared
         /// <param name="callback"></param>
         /// <param name="cancellationTokenSource"></param>
         /// <param name="logger"></param>
-        internal ReadWriteStream(ref NetworkStream networkStream, Action<byte[]> callback, ref CancellationTokenSource cancellationTokenSource, ref ILogger logger)
+        internal ReadWriteStream(ref NetworkStream networkStream, Action<byte[]> callback, int bufferLength, ref CancellationTokenSource cancellationTokenSource)
         {
-            _logger = logger;
             _cancellationTokenSourceSource = cancellationTokenSource;
             _networkStream = networkStream;
             _callback = callback;
+            _bufferLength = bufferLength;
 
             _queueProcessorThread = new Thread(ParseMessagesFromQueue) {IsBackground = true};
             _queueProcessorThread.Start();
@@ -47,7 +48,7 @@ namespace RxMqtt.Shared
         {
             try
             {
-                var state = new StreamState { NetworkStream = _networkStream}; //Important to pass the stream in this manner
+                var state = new StreamState(_bufferLength) { NetworkStream = _networkStream}; //Important to pass the stream in this manner
 
                 _networkStream.BeginRead(state.Buffer, 0, state.Buffer.Length, EndRead, state);
             }
@@ -57,6 +58,8 @@ namespace RxMqtt.Shared
             catch (Exception e)
             {
                 _logger.Log(LogLevel.Error, e);
+
+                _cancellationTokenSourceSource.Cancel();
             }
         }
 
@@ -99,7 +102,7 @@ namespace RxMqtt.Shared
             if (message == null)
                 return;
 
-            _logger.Log(LogLevel.Trace, $"Out => {message.MsgType}");
+            _logger.Log(LogLevel.Trace, $"Out => {message.MsgType}, PacketId: {message.PacketId}");
 
             try
             {
@@ -111,11 +114,11 @@ namespace RxMqtt.Shared
                     return;
                 }
 
-                foreach (var segment in ArraySplit(buffer, 16384))
+                foreach (var segment in ArraySplit(buffer, _bufferLength))
                 {
                     _writeAutoResetEvent.WaitOne();
 
-                    var socketState = new StreamState { NetworkStream = _networkStream };
+                    var socketState = new StreamState(_bufferLength) { NetworkStream = _networkStream };
 
                     _networkStream.BeginWrite(segment, 0, segment.Length, EndWrite, socketState);
                 }

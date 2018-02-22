@@ -19,7 +19,6 @@ namespace RxMqtt.Shared.Messages
         internal static ILogger Logger { get; } = LogManager.GetCurrentClassLogger();
 
         protected QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
-
         internal bool IsDuplicate { get; set; } = false;
 
         internal ushort PacketId { get; set; } = GetNextPacketId();
@@ -135,7 +134,7 @@ namespace RxMqtt.Shared.Messages
                 {
                     break;  
                 }
-            } //while ((encodedByte & 128) != 0 && bytesUsedToStoreValue <= 4 + startIndex); //Maximum of 4 bytes used to store value
+            }
 
             return new Tuple<int, int>(decodedValue, bytesUsedToStoreValue);
         }

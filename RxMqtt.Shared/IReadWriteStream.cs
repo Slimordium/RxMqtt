@@ -2,9 +2,8 @@
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared{
-    public interface IReadWriteStream{
-        //void Read(Action<byte[]> callback);
-
+    public interface IReadWriteStream
+    {
         void Write(MqttMessage message);
     }
 }

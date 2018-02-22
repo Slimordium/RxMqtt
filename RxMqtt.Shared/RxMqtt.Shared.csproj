@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <Platforms>AnyCPU;x64;x64</Platforms>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>1.0.0-rc2</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,5 +16,9 @@
     <PackageReference Include="NLog" Version="4.5.0-rc04" />
     <PackageReference Include="System.Reactive" Version="3.1.1" />
   </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="dotnet pack" />
+  </Target>
 
 </Project>

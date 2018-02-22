@@ -5,11 +5,14 @@ namespace RxMqtt.Shared
 {
     internal class StreamState : IDisposable
     {
-        public byte[] Buffer { get; set; } = new byte[300000];
+        internal StreamState(int bufferLength)
+        {
+            Buffer = new byte[bufferLength];
+        }
 
-        public int BytesIn { get; set; }
+        internal byte[] Buffer { get; private set; }
 
-        public NetworkStream NetworkStream { get; set; }
+        internal NetworkStream NetworkStream { get; set; }
 
         private void Dispose(bool disposing)
         {

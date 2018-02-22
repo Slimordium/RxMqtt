@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
-using System.Reactive.Threading.Tasks;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,18 +21,16 @@ namespace RxMqtt.Client
         /// <param name="connectionId"></param>
         /// <param name="brokerHostname"></param>
         /// <param name="port"></param>
+        /// <param name="cancellationToken"></param>
         /// <param name="keepAliveInSeconds">1200 max</param>
-        /// <param name="pfxFileName">*-private.pfx</param>
-        /// <param name="pfxPassword"></param>
-
+        /// <param name="bufferLength">Sets the Rx/Tx buffer sizes and splits out-going messages into packets of this size</param>
         public MqttClient(
             string connectionId,
             string brokerHostname,
             int port,
+            int bufferLength,
             CancellationToken cancellationToken,
-            int keepAliveInSeconds = 1200,
-            string pfxFileName = "",
-            string pfxPassword = "")
+            int keepAliveInSeconds = 1200)
         {
             _connectionId = connectionId;
             _keepAliveInSeconds = (ushort) keepAliveInSeconds;
@@ -42,15 +39,12 @@ namespace RxMqtt.Client
 
             _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-            //TODO: Allow use of websocket connection instead of TCP
             _connection = new TcpConnection(
-                connectionId,
                 brokerHostname,
                 keepAliveInSeconds,
                 port,
-                ref _cancellationTokenSource,
-                pfxFileName,
-                pfxPassword);
+                bufferLength,
+                ref _cancellationTokenSource);
         }
 
         private readonly CancellationTokenSource _cancellationTokenSource;
@@ -61,7 +55,6 @@ namespace RxMqtt.Client
         private readonly string _connectionId;
         private readonly TcpConnection _connection;
         private ushort _keepAliveInSeconds;
-        private Timer _keepAliveTimer;
         private Status _status = Status.Error;
         private readonly Dictionary<string, IDisposable> _disposables = new Dictionary<string, IDisposable>();
 
@@ -86,13 +79,44 @@ namespace RxMqtt.Client
 
             _connection.Write(new Connect(_connectionId, _keepAliveInSeconds));
 
-            _keepAliveTimer = new Timer(Ping);
-            
-            //_keepAliveDisposable = _connection.WriteSubject.Subscribe(ResetKeepAliveTimer);
-
             return _status;
         }
 
+        public async Task<PublishAck> PublishAsync(string message, string topic, TimeSpan timeout)
+        {
+            var messageToPublish = new Publish
+            {
+                Topic = topic,
+                Message = Encoding.UTF8.GetBytes(message)
+            };
+
+            _logger.Log(LogLevel.Info, $"Publishing to => '{topic}'");
+
+            _connection.Write(messageToPublish);
+
+            var packetEnvelope = await _connection.PacketSyncSubject
+                .Timeout(DateTimeOffset.Now + timeout)
+                .SkipWhile(envelope =>
+                {
+                    if (envelope.MsgType != MsgType.PublishAck)
+                        return true;
+
+                    if (envelope.PacketId != messageToPublish.PacketId)
+                        return true;
+
+                    return false;
+                })
+                .Take(1);
+
+            return (PublishAck) packetEnvelope?.Message;
+        }
+
+        /// <summary>
+        /// Message will be split into packets set by BufferLength
+        /// </summary>
+        /// <param name="message"></param>
+        /// <param name="topic"></param>
+        /// <returns></returns>
         public async Task<PublishAck> PublishAsync(string message, string topic)
         {
             var messageToPublish = new Publish
@@ -100,24 +124,33 @@ namespace RxMqtt.Client
                 Topic = topic,
                 Message = Encoding.UTF8.GetBytes(message)
             };
+
+            _logger.Log(LogLevel.Info, $"Publishing to => '{topic}'");
+
             _connection.Write(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
-                                .SkipWhile(envelope =>
-                                {
-                                    if (envelope.MsgType != MsgType.PublishAck)
-                                        return true;
+                .Timeout(DateTimeOffset.Now + TimeSpan.FromSeconds(2))
+                .SkipWhile(envelope =>
+                {
+                    if (envelope.MsgType != MsgType.PublishAck)
+                        return true;
 
-                                    if (envelope.PacketId != messageToPublish.PacketId)
-                                        return true;
+                    if (envelope.PacketId != messageToPublish.PacketId)
+                        return true;
 
-                                    return false;
-                                })
-                                .Take(1);
+                    return false;
+                })
+                .Take(1);
 
-            return (PublishAck)packetEnvelope.Message;
+            return (PublishAck) packetEnvelope?.Message;
         }
 
+        /// <summary>
+        /// Topic.StartsWith(topic)
+        /// </summary>
+        /// <param name="callback"></param>
+        /// <param name="topic"></param>
         public void Subscribe(Action<string> callback, string topic)
         {
             if (_disposables.ContainsKey(topic))
@@ -157,29 +190,15 @@ namespace RxMqtt.Client
         {
             _logger.Log(LogLevel.Trace, $"Unsubscribe from {topic}");
 
+            if (!_disposables.ContainsKey(topic))
+                return;
+
             _disposables[topic].Dispose();
 
             _disposables.Remove(topic);
 
             _connection.Write(new Unsubscribe(new []{topic}));
         }
-
-        #endregion
-
-        #region PrivateMethods
-        
-        private void Ping(object sender)
-        {
-            _logger.Log(LogLevel.Trace, "Ping");
-
-            _connection.Write(new PingMsg());
-        }
-
-        private void ResetKeepAliveTimer(MqttMessage mqttMessage)
-        {
-            _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
-        }
-
 
         #endregion
     }
