@@ -24,8 +24,8 @@ namespace RxMqtt.Shared
         /// </summary>
         /// <param name="networkStream"></param>
         /// <param name="callback"></param>
+        /// <param name="bufferLength"></param>
         /// <param name="cancellationTokenSource"></param>
-        /// <param name="logger"></param>
         internal ReadWriteStream(ref NetworkStream networkStream, Action<byte[]> callback, int bufferLength, ref CancellationTokenSource cancellationTokenSource)
         {
             _cancellationTokenSourceSource = cancellationTokenSource;
@@ -135,6 +135,42 @@ namespace RxMqtt.Shared
             }
         }
 
+        public void Write(byte[] buffer)
+        {
+            if (buffer == null)
+                return;
+
+            _logger.Log(LogLevel.Trace, $"Out bytes => {buffer.Length}");
+
+            try
+            {
+                if (buffer.Length > 1e+7)
+                {
+                    _logger.Log(LogLevel.Error, "Message size greater than maximum of 1e+7 or 10mb. Not publishing");
+                    return;
+                }
+
+                foreach (var segment in ArraySplit(buffer, _bufferLength))
+                {
+                    _writeAutoResetEvent.WaitOne();
+
+                    var socketState = new StreamState(_bufferLength) { NetworkStream = _networkStream };
+
+                    _networkStream.BeginWrite(segment, 0, segment.Length, EndWrite, socketState);
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Error, e.Message);
+
+                if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                    _cancellationTokenSourceSource.Cancel();
+            }
+        }
+
         private static IEnumerable<byte[]> ArraySplit(byte[] buffer, int segmentLength)
         {
             var arrayLength = buffer.Length;
@@ -180,8 +216,13 @@ namespace RxMqtt.Shared
             }
         }
 
+        private long _queueLock;
+
         private void ParseMessagesFromQueue()
         {
+            if (Interlocked.Exchange(ref _queueLock, 1) == 1)
+                return;
+
             byte[] packetBytes = null;
             var remaining = 0;
             var offset = 0;

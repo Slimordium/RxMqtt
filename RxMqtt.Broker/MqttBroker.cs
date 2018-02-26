@@ -102,6 +102,9 @@ namespace RxMqtt.Broker
 
             socket.UseOnlyOverlappedIO = true;
             socket.Blocking = true;
+            socket.NoDelay = true;
+            socket.ReceiveBufferSize = 16384;
+            socket.SendBufferSize = 16384;
 
             var cuid = Guid.NewGuid();
             var cts = new CancellationTokenSource();
@@ -112,9 +115,7 @@ namespace RxMqtt.Broker
 
             _cancellationTokenSources.Add(cts);
 
-            var networkStream = new NetworkStream(socket);
-
-            _clients.Add(cuid, new Client(networkStream, ref _publishSyncSubject, ref cts));
+            _clients.Add(cuid, new Client(socket, ref _publishSyncSubject, ref cts));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 

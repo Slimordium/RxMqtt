@@ -32,13 +32,14 @@ namespace RxMqtt.Broker
 
         private readonly IReadWriteStream _readWriteStream;
 
-        internal  Client(NetworkStream networkStream, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
+        internal  Client(Socket socket, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
         {
+            _networkStream = new NetworkStream(socket);
+
             _cancellationTokenSource = cancellationTokenSource;
-            _networkStream = networkStream;
             _brokerPublishSubject = brokerPublishSubject;
 
-            _readWriteStream = new ReadWriteStream(ref _networkStream, ProcessPackets, ref cancellationTokenSource, ref _logger);
+            _readWriteStream = new ReadWriteStream(ref _networkStream, ProcessPackets, 16384, ref cancellationTokenSource);
 
             cancellationTokenSource.Token.Register(() =>
             {
@@ -49,10 +50,10 @@ namespace RxMqtt.Broker
             });
         }
 
-        private void OnNextPublish(Publish mqttMessage)
+        private void OnNext(Publish buffer)
         {
             //This sends the message to the client attached to this _networkStream
-            _readWriteStream.Write(mqttMessage);
+            _readWriteStream.Write(buffer);
         }
 
         private void ProcessPackets(byte[] buffer)
@@ -83,16 +84,16 @@ namespace RxMqtt.Broker
 
                         _clientId = connectMsg.ClientId;
 
-                        _keepAliveDisposable?.Dispose();
+                        //_keepAliveDisposable?.Dispose();
 
-                        _keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
-                        {
-                            if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
+                        //_keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
+                        //{
+                        //    if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
 
-                            _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
+                        //    _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
 
-                            _cancellationTokenSource.Cancel(false);
-                        });
+                        //    _cancellationTokenSource.Cancel(false);
+                        //});
 
                         _logger = LogManager.GetLogger(_clientId);
 
@@ -122,7 +123,7 @@ namespace RxMqtt.Broker
                 _logger.Log(LogLevel.Error, $"ProcessRead error '{e.Message}'");
             }
 
-            Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
+            //Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
         }
 
         private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic
@@ -139,11 +140,11 @@ namespace RxMqtt.Broker
                 if (topic.EndsWith("#"))
                 {
                     var newtopic = topic.Replace("#", "");
-                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNext));
                 }
                 else
                 {
-                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNextPublish));
+                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNext));
                 }
                 
                 _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
