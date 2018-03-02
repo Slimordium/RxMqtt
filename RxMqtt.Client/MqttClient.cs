@@ -90,12 +90,12 @@ namespace RxMqtt.Client
                 Message = Encoding.UTF8.GetBytes(message)
             };
 
-            _logger.Log(LogLevel.Info, $"Publishing to => '{topic}'");
+            _logger.Log(LogLevel.Info, $"Publishing string to => '{topic}'");
 
             _connection.Write(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
-                .Timeout(DateTimeOffset.Now + timeout)
+                .Timeout(timeout)
                 .SkipWhile(envelope =>
                 {
                     if (envelope.MsgType != MsgType.PublishAck)
@@ -109,6 +109,35 @@ namespace RxMqtt.Client
                 .Take(1);
 
             return (PublishAck) packetEnvelope?.Message;
+        }
+
+        public async Task<PublishAck> PublishAsync(byte[] buffer, string topic, TimeSpan timeout)
+        {
+            var messageToPublish = new Publish
+            {
+                Topic = topic,
+                Message = buffer
+            };
+
+            _logger.Log(LogLevel.Info, $"Publishing bytes to => '{topic}'");
+
+            _connection.Write(messageToPublish);
+
+            var packetEnvelope = await _connection.PacketSyncSubject
+                .Timeout(timeout)
+                .SkipWhile(envelope =>
+                {
+                    if (envelope.MsgType != MsgType.PublishAck)
+                        return true;
+
+                    if (envelope.PacketId != messageToPublish.PacketId)
+                        return true;
+
+                    return false;
+                })
+                .Take(1);
+
+            return (PublishAck)packetEnvelope?.Message;
         }
 
         /// <summary>
@@ -181,6 +210,41 @@ namespace RxMqtt.Client
                         var msg = (Publish) publish.Message;
 
                         callback.Invoke(Encoding.UTF8.GetString(msg.Message)); 
+                    }));
+
+            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+        }
+
+        public void Subscribe(Action<byte[]> callback, string topic)
+        {
+            if (_disposables.ContainsKey(topic))
+            {
+                _logger.Log(LogLevel.Warn, $"Already subscribed to '{topic}'");
+                return;
+            }
+
+            _disposables.Add(topic,
+                _connection.PacketSyncSubject
+                    .Where(publish =>
+                    {
+                        if (publish != null && publish.MsgType == MsgType.Publish)
+                        {
+                            var msg = (Publish)publish.Message;
+
+                            if (msg == null || !msg.Topic.StartsWith(topic))
+                                return false;
+
+                            return true;
+                        }
+
+                        return false;
+                    })
+                    .SubscribeOn(Scheduler.Default)
+                    .Subscribe(publish =>
+                    {
+                        var msg = (Publish)publish.Message;
+
+                        callback.Invoke(msg.Message);
                     }));
 
             _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
