@@ -279,7 +279,7 @@ namespace RxMqtt.Shared
 
                         remaining -= buffer.Length;
 
-                        Buffer.BlockCopy(newBuffer, 0, packetBytes, 0, buffer.Length);
+                        Buffer.BlockCopy(newBuffer, 0, packetBytes, 0, buffer.Length - skipCount);
                         break;
                     }
 
