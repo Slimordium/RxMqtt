@@ -59,8 +59,10 @@ namespace RxMqtt.Client{
                 {
                     UseOnlyOverlappedIO = true,
                     Blocking = true,
-                    SendBufferSize = _bufferLength,
-                    ReceiveBufferSize = _bufferLength
+                    //SendBufferSize = _bufferLength,
+                    //ReceiveBufferSize = _bufferLength,
+                    //NoDelay = true
+
                 };
 
                 await _socket.ConnectAsync(new IPEndPoint(_ipAddress, _port));

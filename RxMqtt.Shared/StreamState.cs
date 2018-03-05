@@ -5,6 +5,11 @@ namespace RxMqtt.Shared
 {
     internal class StreamState : IDisposable
     {
+        internal StreamState()
+        {
+            Buffer = new byte[66000];
+        }
+
         internal StreamState(int bufferLength)
         {
             Buffer = new byte[bufferLength];

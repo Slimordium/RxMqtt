@@ -48,7 +48,7 @@ namespace RxMqtt.Shared
         {
             try
             {
-                var state = new StreamState(_bufferLength) { NetworkStream = _networkStream}; //Important to pass the stream in this manner
+                var state = new StreamState() { NetworkStream = _networkStream}; //Important to pass the stream in this manner
 
                 _networkStream.BeginRead(state.Buffer, 0, state.Buffer.Length, EndRead, state);
             }
@@ -271,19 +271,37 @@ namespace RxMqtt.Shared
 
                     remaining = GetMessageLength(ref newBuffer);
 
-                    if (remaining - buffer.Length  > 0)
+                    if (remaining - buffer.Length > 0)
                     {
-                        packetBytes = new byte[remaining];
+                        try
+                        {
+                            packetBytes = new byte[remaining];
 
-                        offset = buffer.Length;
+                            offset = buffer.Length;
 
-                        remaining -= buffer.Length;
+                            remaining -= buffer.Length;
 
-                        Buffer.BlockCopy(newBuffer, 0, packetBytes, 0, buffer.Length - skipCount);
+                            Buffer.BlockCopy(newBuffer, 0, packetBytes, 0, buffer.Length - skipCount);
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.Log(LogLevel.Error, $"ParseMessagesFromQueue => '{e.Message}' buffer.length:{buffer.Length}, skipCount:{skipCount}, packetBytes.length:{packetBytes?.Length}, remaining:{remaining}");
+
+                            offset = 0;
+                            skipCount = 0;
+                            remaining = 0;
+                            packetBytes = null;
+
+                            _callback.Invoke(newBuffer);
+                        }
+
                         break;
                     }
 
+                    offset = 0;
+                    skipCount = 0;
                     remaining = 0;
+                    packetBytes = null;
 
                     _callback.Invoke(newBuffer);
 

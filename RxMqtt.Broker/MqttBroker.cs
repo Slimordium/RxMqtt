@@ -102,9 +102,9 @@ namespace RxMqtt.Broker
 
             socket.UseOnlyOverlappedIO = true;
             socket.Blocking = true;
-            socket.NoDelay = true;
-            socket.ReceiveBufferSize = 16384;
-            socket.SendBufferSize = 16384;
+            //socket.NoDelay = true;
+            //socket.ReceiveBufferSize = 60000;
+            //socket.SendBufferSize = 60000;
 
             var cuid = Guid.NewGuid();
             var cts = new CancellationTokenSource();
