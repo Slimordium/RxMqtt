@@ -15,13 +15,14 @@ namespace RxMqtt.Shared.Messages
     /// Packet processing code examples can be found here, along with protocol specifications
     /// https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.pdf
     /// </summary>
-    public abstract class MqttMessage{
+    public abstract class MqttMessage
+    {
         internal static ILogger Logger { get; } = LogManager.GetCurrentClassLogger();
 
         protected QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
         internal bool IsDuplicate { get; set; } = false;
 
-        internal ushort PacketId { get; set; } = GetNextPacketId();
+        internal ushort PacketId { get; set; }// = GetNextPacketId();
 
         internal MsgType MsgType { get; set; } = MsgType.Publish;
 

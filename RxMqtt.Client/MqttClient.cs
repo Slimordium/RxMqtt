@@ -77,7 +77,7 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"KeepAliveSeconds => {_keepAliveInSeconds}");
 
-            _connection.Write(new Connect(_connectionId, _keepAliveInSeconds));
+            _connection.WriteSubject.OnNext(new Connect(_connectionId, _keepAliveInSeconds));
 
             return _status;
         }
@@ -92,9 +92,10 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Info, $"Publishing string to => '{topic}'");
 
-            _connection.Write(messageToPublish);
+            _connection.WriteSubject.OnNext(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
+                .SubscribeOn(Scheduler.Default)
                 .Timeout(timeout)
                 .SkipWhile(envelope =>
                 {
@@ -121,12 +122,16 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Info, $"Publishing bytes to => '{topic}'");
 
-            _connection.Write(messageToPublish);
+            _connection.WriteSubject.OnNext(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
+                .SubscribeOn(Scheduler.Default)
                 .Timeout(timeout)
                 .SkipWhile(envelope =>
                 {
+                    if (envelope == null)
+                        return true;
+
                     if (envelope.MsgType != MsgType.PublishAck)
                         return true;
 
@@ -156,21 +161,22 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Info, $"Publishing to => '{topic}'");
 
-            _connection.Write(messageToPublish);
+            _connection.WriteSubject.OnNext(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
-                .Timeout(DateTimeOffset.Now + TimeSpan.FromSeconds(2))
-                .SkipWhile(envelope =>
-                {
-                    if (envelope.MsgType != MsgType.PublishAck)
-                        return true;
+                    .SubscribeOn(Scheduler.Default)
+                    .Timeout(DateTimeOffset.Now + TimeSpan.FromSeconds(2))
+                    .SkipWhile(envelope =>
+                    {
+                        if (envelope.MsgType != MsgType.PublishAck)
+                            return true;
 
-                    if (envelope.PacketId != messageToPublish.PacketId)
-                        return true;
+                        if (envelope.PacketId != messageToPublish.PacketId)
+                            return true;
 
-                    return false;
-                })
-                .Take(1);
+                        return false;
+                    })
+                    .Take(1);
 
             return (PublishAck) packetEnvelope?.Message;
         }
@@ -212,7 +218,7 @@ namespace RxMqtt.Client
                         callback.Invoke(Encoding.UTF8.GetString(msg.Message)); 
                     }));
 
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+            _connection.WriteSubject.OnNext(new Subscribe(_disposables.Keys.ToArray()));
         }
 
         public void Subscribe(Action<byte[]> callback, string topic)
@@ -247,7 +253,7 @@ namespace RxMqtt.Client
                         callback.Invoke(msg.Message);
                     }));
 
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+            _connection.WriteSubject.OnNext(new Subscribe(_disposables.Keys.ToArray()));
         }
 
         public void Unsubscribe(string topic)
@@ -261,7 +267,7 @@ namespace RxMqtt.Client
 
             _disposables.Remove(topic);
 
-            _connection.Write(new Unsubscribe(new []{topic}));
+            _connection.WriteSubject.OnNext(new Unsubscribe(new[] { topic }));
         }
 
         #endregion

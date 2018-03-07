@@ -24,12 +24,14 @@ namespace RxMqtt.Shared.Messages
         internal Subscribe()
         {
             MsgType = MsgType.Subscribe;
+            PacketId = GetNextPacketId();
         }
 
         internal Subscribe(string[] topics)
         {
             MsgType = MsgType.Subscribe;
             Topics = topics;
+            PacketId = GetNextPacketId();
         }
 
         internal Subscribe(ushort packetId)

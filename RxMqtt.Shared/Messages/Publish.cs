@@ -32,6 +32,8 @@ namespace RxMqtt.Shared.Messages
         internal Publish()
         {
             MsgType = MsgType.Publish;
+
+            PacketId = GetNextPacketId();
         }
 
         internal Publish(string topic, byte[] message)
@@ -76,7 +78,7 @@ namespace RxMqtt.Shared.Messages
                 }
                 else
                 {
-                    _logger.Log(LogLevel.Warn, $"Invalid buffer! => Buffer Length:{buffer.Length}, PacketId:{PacketId}, Topic:{Topic}, Minimum packet length: {decodeValue.Item1}");
+                    _logger.Log(LogLevel.Error, $"Invalid buffer! => Buffer Length:{buffer.Length}, PacketId:{PacketId}, Topic:{Topic}, Minimum packet length: {decodeValue.Item1}");
                 }
             }
             catch (Exception e)

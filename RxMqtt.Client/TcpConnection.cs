@@ -2,6 +2,8 @@
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +16,10 @@ namespace RxMqtt.Client{
     {
         internal ISubject<PacketEnvelope> PacketSyncSubject { get; }
 
+        internal ISubject<MqttMessage> WriteSubject { get; }
+
+        private IDisposable _writeDisposable;
+
         internal TcpConnection
         (
             string hostName,
@@ -24,6 +30,7 @@ namespace RxMqtt.Client{
         )
         {
             PacketSyncSubject = Subject.Synchronize(_packetSyncSubject);
+            WriteSubject = Subject.Synchronize(_writeSyncSubject);
 
             _cancellationTokenSource = cancellationTokenSource;
 
@@ -55,26 +62,22 @@ namespace RxMqtt.Client{
                     }
                 }
                
-                _socket = new Socket(_ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
+                var socket = new Socket(_ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
                 {
                     UseOnlyOverlappedIO = true,
                     Blocking = true,
-                    //SendBufferSize = _bufferLength,
-                    //ReceiveBufferSize = _bufferLength,
-                    //NoDelay = true
-
                 };
 
-                await _socket.ConnectAsync(new IPEndPoint(_ipAddress, _port));
+                await socket.ConnectAsync(new IPEndPoint(_ipAddress, _port));
 
-                if (!_socket.Connected)
+                if (!socket.Connected)
                     return Status.SocketError;
-
-                _networkStream = new NetworkStream(_socket, true);
 
                 _status = Status.Initialized;
               
-                _readWriteStream = new ReadWriteStream(ref _networkStream, ProcessPackets, _bufferLength, ref _cancellationTokenSource);
+                _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true), ProcessPackets, ref _cancellationTokenSource);
+
+                _writeDisposable = WriteSubject.SubscribeOn(Scheduler.Default).Subscribe(Write);
             }
             catch (Exception e)
             {
@@ -86,7 +89,7 @@ namespace RxMqtt.Client{
             return _status;
         }
 
-        internal void Write(MqttMessage mqttMessage)
+        private void Write(MqttMessage mqttMessage)
         {
             if (_status != Status.Initialized || _readWriteStream == null)
                 throw new Exception("Not initialized");
@@ -140,9 +143,6 @@ namespace RxMqtt.Client{
 
         #region PrivateFields
 
-        private static Socket _socket;
-        private static NetworkStream _networkStream;
-
         private IPAddress _ipAddress;
         private readonly ushort _keepAliveInSeconds;
 
@@ -150,6 +150,8 @@ namespace RxMqtt.Client{
         private readonly int _port;
         private readonly int _bufferLength;
         private readonly ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
+        private readonly ISubject<MqttMessage> _writeSyncSubject = new BehaviorSubject<MqttMessage>(null);
+
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private IReadWriteStream _readWriteStream;
         private readonly string _hostName;

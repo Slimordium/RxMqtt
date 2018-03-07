@@ -12,6 +12,7 @@ namespace RxMqtt.Shared.Messages
         internal PingMsg()
         {
             MsgType = MsgType.PingRequest;
+            PacketId = GetNextPacketId();
         }
 
         

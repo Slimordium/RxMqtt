@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using NLog;
+using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
@@ -53,7 +55,15 @@ namespace RxMqtt.Broker
             _port = port;
         }
 
-        private ISubject<Publish> _publishSyncSubject;
+        private static readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
+
+        internal static ISubject<Publish> PublishSyncSubject;
+
+        internal static IObservable<Publish> Subscribe(string topic)
+        {
+            return PublishSyncSubject.Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic));
+        }
+
 
         public void StartListening(CancellationToken cancellationToken = default(CancellationToken))
         {
@@ -63,7 +73,7 @@ namespace RxMqtt.Broker
                 return;
             }
 
-            _publishSyncSubject = Subject.Synchronize(_publishSubject);
+            PublishSyncSubject = Subject.Synchronize(_publishSubject);
 
             _started = true;
 
@@ -102,9 +112,6 @@ namespace RxMqtt.Broker
 
             socket.UseOnlyOverlappedIO = true;
             socket.Blocking = true;
-            //socket.NoDelay = true;
-            //socket.ReceiveBufferSize = 60000;
-            //socket.SendBufferSize = 60000;
 
             var cuid = Guid.NewGuid();
             var cts = new CancellationTokenSource();
@@ -115,7 +122,7 @@ namespace RxMqtt.Broker
 
             _cancellationTokenSources.Add(cts);
 
-            _clients.Add(cuid, new Client(socket, ref _publishSyncSubject, ref cts));
+            _clients.Add(cuid, new Client(socket, ref cts));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 

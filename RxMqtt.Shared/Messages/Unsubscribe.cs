@@ -18,12 +18,14 @@ namespace RxMqtt.Shared.Messages
         internal Unsubscribe()
         {
             MsgType = MsgType.Unsubscribe;
+            PacketId = GetNextPacketId();
         }
 
         internal Unsubscribe(string[] topics)
         {
             MsgType = MsgType.Unsubscribe;
             Topics = topics;
+            PacketId = GetNextPacketId();
         }
         
         internal override byte[] GetBytes()

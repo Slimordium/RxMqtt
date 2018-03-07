@@ -1,9 +1,13 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
+using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
@@ -14,51 +18,52 @@ namespace RxMqtt.Broker
     {
         private string _clientId;
 
-        private readonly NetworkStream _networkStream;
-
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly List<string> _subscriptions = new List<string>();
+        private readonly ConcurrentBag<string> _subscriptions = new ConcurrentBag<string>();
 
-        private readonly ISubject<Publish> _brokerPublishSubject;
-
-        private IDisposable _keepAliveDisposable;
-
-        private readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
-
-        private readonly CancellationTokenSource _cancellationTokenSource;
-
-        private long _shouldCancel;
+        private readonly List<IDisposable> _disposables = new List<IDisposable>();
 
         private readonly IReadWriteStream _readWriteStream;
 
-        internal  Client(Socket socket, ref ISubject<Publish> brokerPublishSubject, ref CancellationTokenSource cancellationTokenSource)
+        private readonly ISubject<Publish> _writeSyncSubject = new BehaviorSubject<Publish>(null);
+
+        private readonly ISubject<Publish> _writeSubject;
+
+        internal Client(Socket socket, ref CancellationTokenSource cancellationTokenSource)
         {
-            _networkStream = new NetworkStream(socket);
-
-            _cancellationTokenSource = cancellationTokenSource;
-            _brokerPublishSubject = brokerPublishSubject;
-
-            _readWriteStream = new ReadWriteStream(ref _networkStream, ProcessPackets, 16384, ref cancellationTokenSource);
+            while (!socket.Connected)
+            {
+                Task.Delay(500).Wait();
+            }
 
             cancellationTokenSource.Token.Register(() =>
             {
-                foreach (var disposable in _subscriptionDisposables)
+                foreach (var disposable in _disposables)
                 {
                     disposable.Dispose();
                 }
             });
+
+            _readWriteStream = new ReadWriteStream(new NetworkStream(socket), ProcessPackets, ref cancellationTokenSource);
+
+            _writeSubject = Subject.Synchronize(_writeSyncSubject);
+            _disposables.Add(_writeSubject.Subscribe(OnNext));
         }
 
         private void OnNext(Publish buffer)
         {
             //This sends the message to the client attached to this _networkStream
+
+            if (buffer == null)
+                return;
+
             _readWriteStream.Write(buffer);
         }
 
         private void ProcessPackets(byte[] buffer)
         {
-            if (buffer.Length == 0)
+            if (buffer == null || buffer.Length <= 1)
                 return;
 
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
@@ -72,7 +77,7 @@ namespace RxMqtt.Broker
                     case MsgType.Publish:
                         var publishMsg = new Publish(buffer);
 
-                        _brokerPublishSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
+                        MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
 
                         _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
 
@@ -137,17 +142,19 @@ namespace RxMqtt.Broker
 
                 //_topicSubject.OnNext(new KeyValuePair<string, string>(_clientId, topic));
 
-                if (topic.EndsWith("#"))
-                {
-                    var newtopic = topic.Replace("#", "");
-                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNext));
-                }
-                else
-                {
-                    _subscriptionDisposables.Add(_brokerPublishSubject.Where(m => m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNext));
-                }
-                
-                _logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
+                //if (topic.EndsWith("#"))
+                //{
+                //    var newtopic = topic.Replace("#", "");
+                //    _disposables.Add(MqttBroker.PublishSyncSubject.SubscribeOn(Scheduler.Default).Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNext));
+                //}
+                //else
+                //{
+                //    _disposables.Add(MqttBroker.PublishSyncSubject.Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNext));
+                //}
+
+                //_logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
+
+                _disposables.Add(MqttBroker.Subscribe(topic).SubscribeOn(Scheduler.Default).Subscribe(_writeSubject.OnNext));
             }
         }
     }
