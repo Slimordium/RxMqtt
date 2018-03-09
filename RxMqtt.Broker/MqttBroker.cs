@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
@@ -61,7 +62,7 @@ namespace RxMqtt.Broker
 
         internal static IObservable<Publish> Subscribe(string topic)
         {
-            return PublishSyncSubject.Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic));
+            return PublishSyncSubject.SubscribeOn(Scheduler.Default).Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic));
         }
 
 

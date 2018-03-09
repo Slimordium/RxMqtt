@@ -26,9 +26,9 @@ namespace RxMqtt.Broker
 
         private readonly IReadWriteStream _readWriteStream;
 
-        private readonly ISubject<Publish> _writeSyncSubject = new BehaviorSubject<Publish>(null);
+        private readonly ISubject<MqttMessage> _writeSyncSubject = new BehaviorSubject<MqttMessage>(null);
 
-        private readonly ISubject<Publish> _writeSubject;
+        private readonly ISubject<MqttMessage> _writeSubject;
 
         internal Client(Socket socket, ref CancellationTokenSource cancellationTokenSource)
         {
@@ -48,10 +48,10 @@ namespace RxMqtt.Broker
             _readWriteStream = new ReadWriteStream(new NetworkStream(socket), ProcessPackets, ref cancellationTokenSource);
 
             _writeSubject = Subject.Synchronize(_writeSyncSubject);
-            _disposables.Add(_writeSubject.Subscribe(OnNext));
+            _disposables.Add(_writeSubject.SubscribeOn(Scheduler.Default).Subscribe(OnNext));
         }
 
-        private void OnNext(Publish buffer)
+        private void OnNext(MqttMessage buffer)
         {
             //This sends the message to the client attached to this _networkStream
 
@@ -77,10 +77,9 @@ namespace RxMqtt.Broker
                     case MsgType.Publish:
                         var publishMsg = new Publish(buffer);
 
+                        _writeSubject.OnNext(new PublishAck(publishMsg.PacketId));
+
                         MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
-
-                        _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
-
                         break;
                     case MsgType.Connect:
                         var connectMsg = new Connect(buffer);
@@ -102,16 +101,18 @@ namespace RxMqtt.Broker
 
                         _logger = LogManager.GetLogger(_clientId);
 
-                        _readWriteStream.Write(new ConnectAck());
+                        _readWriteStream.SetLogger(_logger);
+
+                        _writeSubject.OnNext(new ConnectAck());
                         break;
                     case MsgType.PingRequest:
 
-                        _readWriteStream.Write(new PingResponse());
+                        _writeSubject.OnNext(new PingResponse());
                         break;
                     case MsgType.Subscribe:
                         var subscribeMsg = new Subscribe(buffer);
 
-                        _readWriteStream.Write(new SubscribeAck(subscribeMsg.PacketId));
+                        _writeSubject.OnNext(new SubscribeAck(subscribeMsg.PacketId));
 
                         Subscribe(subscribeMsg.Topics);
                         break;

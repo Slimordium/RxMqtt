@@ -14,7 +14,7 @@ namespace RxMqtt.Shared
 {
     internal class ReadWriteStream : IReadWriteStream
     {
-        private readonly ILogger _logger;
+        private ILogger _logger;
         private readonly NetworkStream _networkStream;
         private readonly IDisposable _disposable;
         private readonly Action<byte[]> _callback;
@@ -37,12 +37,14 @@ namespace RxMqtt.Shared
             _disposable = PacketEnumerable()
                 .ToObservable()
                 .SubscribeOn(Scheduler.Default)
-                .Subscribe(bytes =>
-                {
-                    _callback.Invoke(bytes);
-                });
+                .Subscribe(_callback.Invoke);
 
             _cancellationTokenSourceSource.Token.Register(() => { _disposable?.Dispose(); });
+        }
+
+        public void SetLogger(ILogger logger)
+        {
+            _logger = logger;
         }
 
         private byte[] ReadBytes(int bytesToRead)
@@ -108,7 +110,7 @@ namespace RxMqtt.Shared
 
                 var tempTypeByte = ReadBytes(1);
 
-                if (tempTypeByte == null)
+                if (tempTypeByte == null || tempTypeByte[0] == 0x00)
                     break;
 
                 var typeByte = tempTypeByte[0];
@@ -176,7 +178,14 @@ namespace RxMqtt.Shared
                 {
                     _logger.Log(LogLevel.Info, $"Packet read completed {rxBuffer.Length} bytes");
 
+                    totalPacketLength = 0;
+                    offset = 0;
+                    readLength = 0;
+
                     yield return rxBuffer;
+
+                    rxBuffer = null;
+                    packetBuffer = null;
                     continue;
                 }
 
@@ -197,10 +206,33 @@ namespace RxMqtt.Shared
             if (message == null)
                 return;
 
-            WriteInternal(message.GetBytes());
+            //BeginWrite(message.GetBytes());
+            WriteBinary(message.GetBytes());
         }
 
-        private void WriteInternal(byte[] buffer)
+        private void WriteBinary(byte[] buffer)
+        {
+            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+
+            _logger.Log(LogLevel.Info, $"Out => '{msgType}', '{buffer.Length}' bytes - ");
+
+            try
+            {
+                using (var writer = new BinaryWriter(_networkStream, Encoding.UTF8, true))
+                {
+                    writer.Write(buffer);
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Error, e.Message);
+
+                if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                    _cancellationTokenSourceSource.Cancel();
+            }
+        }
+
+        private void BeginWrite(byte[] buffer)
         {
             if (_cancellationTokenSourceSource.IsCancellationRequested)
                 return;
@@ -211,9 +243,6 @@ namespace RxMqtt.Shared
             {
                 var ar = _networkStream.BeginWrite(buffer, 0, buffer.Length, EndWrite, _networkStream);
                 ar.AsyncWaitHandle.WaitOne();
-            }
-            catch (ObjectDisposedException)
-            {
             }
             catch (Exception e)
             {
@@ -229,7 +258,8 @@ namespace RxMqtt.Shared
             if (buffer == null)
                 return;
 
-            WriteInternal(buffer);
+            //BeginWrite(buffer);
+            WriteBinary(buffer);
         }
 
         private static IEnumerable<byte[]> ArraySplit(byte[] buffer, int segmentLength)

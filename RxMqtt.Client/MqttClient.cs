@@ -95,18 +95,26 @@ namespace RxMqtt.Client
             _connection.WriteSubject.OnNext(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
-                .SubscribeOn(Scheduler.Default)
                 .Timeout(timeout)
                 .SkipWhile(envelope =>
                 {
+                    if (envelope == null)
+                        return true;
+
                     if (envelope.MsgType != MsgType.PublishAck)
                         return true;
 
+                    return false;
+                })
+                .SubscribeOn(Scheduler.Default)
+                .SkipWhile(envelope =>
+                {
                     if (envelope.PacketId != messageToPublish.PacketId)
                         return true;
 
                     return false;
                 })
+                .SubscribeOn(Scheduler.Default)
                 .Take(1);
 
             return (PublishAck) packetEnvelope?.Message;
@@ -125,7 +133,6 @@ namespace RxMqtt.Client
             _connection.WriteSubject.OnNext(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
-                .SubscribeOn(Scheduler.Default)
                 .Timeout(timeout)
                 .SkipWhile(envelope =>
                 {
@@ -135,11 +142,17 @@ namespace RxMqtt.Client
                     if (envelope.MsgType != MsgType.PublishAck)
                         return true;
 
+                    return false;
+                })
+                .SubscribeOn(Scheduler.Default)
+                .SkipWhile(envelope =>
+                {
                     if (envelope.PacketId != messageToPublish.PacketId)
                         return true;
 
                     return false;
                 })
+                .SubscribeOn(Scheduler.Default)
                 .Take(1);
 
             return (PublishAck)packetEnvelope?.Message;
@@ -164,18 +177,26 @@ namespace RxMqtt.Client
             _connection.WriteSubject.OnNext(messageToPublish);
 
             var packetEnvelope = await _connection.PacketSyncSubject
-                    .SubscribeOn(Scheduler.Default)
-                    .Timeout(DateTimeOffset.Now + TimeSpan.FromSeconds(2))
-                    .SkipWhile(envelope =>
-                    {
-                        if (envelope.MsgType != MsgType.PublishAck)
-                            return true;
+                .Timeout(TimeSpan.FromSeconds(2))
+                .SkipWhile(envelope =>
+                {
+                    if (envelope == null)
+                        return true;
 
-                        if (envelope.PacketId != messageToPublish.PacketId)
-                            return true;
+                    if (envelope.MsgType != MsgType.PublishAck)
+                        return true;
 
-                        return false;
-                    })
+                    return false;
+                })
+                .SubscribeOn(Scheduler.Default)
+                .SkipWhile(envelope =>
+                {
+                    if (envelope.PacketId != messageToPublish.PacketId)
+                        return true;
+
+                    return false;
+                })
+                .SubscribeOn(Scheduler.Default)
                     .Take(1);
 
             return (PublishAck) packetEnvelope?.Message;
@@ -196,6 +217,7 @@ namespace RxMqtt.Client
 
             _disposables.Add(topic, 
                 _connection.PacketSyncSubject
+                .SubscribeOn(Scheduler.Default)
                 .Where(publish =>
                     {
                         if (publish != null && publish.MsgType == MsgType.Publish)
@@ -231,6 +253,7 @@ namespace RxMqtt.Client
 
             _disposables.Add(topic,
                 _connection.PacketSyncSubject
+                    .SubscribeOn(Scheduler.Default)
                     .Where(publish =>
                     {
                         if (publish != null && publish.MsgType == MsgType.Publish)

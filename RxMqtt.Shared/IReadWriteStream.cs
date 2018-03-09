@@ -1,4 +1,5 @@
 ﻿using System;
+using NLog;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared{
@@ -7,5 +8,7 @@ namespace RxMqtt.Shared{
         void Write(MqttMessage message);
 
         void Write(byte[] buffer);
+
+        void SetLogger(ILogger logger);
     }
 }
