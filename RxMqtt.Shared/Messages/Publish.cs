@@ -93,7 +93,6 @@ namespace RxMqtt.Shared.Messages
 
             try
             {
-                
                 var topicBytes = Encoding.UTF8.GetBytes(Topic);
                 var messageLength = topicBytes.Length + (int)MsgSize.MessageId + 2;
 
@@ -106,8 +105,8 @@ namespace RxMqtt.Shared.Messages
 
                 packet = new byte[messageLength + encodedPacketSize.Length + 1];
 
-                if (messageLength > 1e+7)
-                    throw new ArgumentOutOfRangeException("Invalid buffer length! Maximum is 1e+7. ");
+                if (messageLength > 2000000)
+                    throw new ArgumentOutOfRangeException("Invalid buffer length");
                 
                 var messageTypeDupQosRetain = (byte)(((byte)MsgType.Publish << (byte)MsgOffset.Type) | ((byte)QosLevel << QosLevelOffset));
 
@@ -124,7 +123,10 @@ namespace RxMqtt.Shared.Messages
                 
                 Buffer.BlockCopy(packetId, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length + topicBytes.Length, packetId.Length);
 
-                Buffer.BlockCopy(Message, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length + topicBytes.Length + packetId.Length, Message.Length);
+                if (Message != null)
+                    Buffer.BlockCopy(Message, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length + topicBytes.Length + packetId.Length, Message.Length);
+                else
+                    Logger.Log(LogLevel.Warn, "Message was null");
             }
             catch (Exception e)
             {

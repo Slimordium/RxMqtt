@@ -4,12 +4,11 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <Platforms>AnyCPU;x64;x64</Platforms>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.0.0-rc6</Version>
+    <Version>1.0.0-rc8</Version>
     <Description>Interfaces and shared models for RxMqtt client and broker</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Enums\" />
     <Folder Include="Messages\" />
   </ItemGroup>
 

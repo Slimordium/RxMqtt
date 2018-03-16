@@ -43,7 +43,10 @@ namespace RxMqtt.Client.Console
                     continue;
 
                 if (line.StartsWith("q"))
+                {
+                    _mqttClient.Dispose();
                     return;
+                }
 
                 if (line.StartsWith("s"))
                 {
@@ -53,7 +56,9 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(line))
                         continue;
 
-                    _mqttClient.Subscribe(Handler, line.Trim());
+                    //_mqttClient.Subscribe(Handler, line.Trim());
+
+                    _mqttClient.GetPublishStringObservable(line.Trim()).Subscribe(Handler);
 
                     System.Console.WriteLine("subscribed");
                 }

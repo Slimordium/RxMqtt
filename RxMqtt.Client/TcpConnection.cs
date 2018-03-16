@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using NLog;
@@ -12,13 +13,11 @@ using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client{
-    internal class TcpConnection
+    internal class TcpConnection : IDisposable
     {
-        internal ISubject<PacketEnvelope> PacketSyncSubject { get; }
+        internal ISubject<PacketEnvelope> PacketSubject { get; }
 
-        internal ISubject<MqttMessage> WriteSubject { get; }
-
-        private IDisposable _writeDisposable;
+        //private IDisposable _writeDisposable;
 
         internal TcpConnection
         (
@@ -29,8 +28,8 @@ namespace RxMqtt.Client{
             ref CancellationTokenSource cancellationTokenSource
         )
         {
-            PacketSyncSubject = Subject.Synchronize(_packetSyncSubject);
-            WriteSubject = Subject.Synchronize(_writeSyncSubject);
+            PacketSubject = Subject.Synchronize(_packetSyncSubject);
+            //WriteSubject = Subject.Synchronize(_writeSyncSubject);
 
             _cancellationTokenSource = cancellationTokenSource;
 
@@ -75,9 +74,11 @@ namespace RxMqtt.Client{
 
                 _status = Status.Initialized;
               
-                _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true), ProcessPackets, ref _cancellationTokenSource);
+                _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true), ref _cancellationTokenSource);
 
-                _writeDisposable = WriteSubject.SubscribeOn(Scheduler.Default).Subscribe(Write);
+
+                _readDisposable = _readWriteStream.PacketObservable.SubscribeOn(Scheduler.Default).Subscribe(ProcessPackets);
+                //_writeDisposable = WriteSubject.SubscribeOn(NewThreadScheduler.Default).Subscribe(Write);
             }
             catch (Exception e)
             {
@@ -89,7 +90,9 @@ namespace RxMqtt.Client{
             return _status;
         }
 
-        private void Write(MqttMessage mqttMessage)
+        private IDisposable _readDisposable;
+
+        public void Write(MqttMessage mqttMessage)
         {
             if (_status != Status.Initialized || _readWriteStream == null)
                 throw new Exception("Not initialized");
@@ -110,19 +113,20 @@ namespace RxMqtt.Client{
                 {
                     case MsgType.Publish:
                         var msg = new Publish(packet);
-                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
+
+                        PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
                         _readWriteStream.Write(new PublishAck(msg.PacketId));
 
                         _logger.Log(LogLevel.Info, $"In <= {msgType} PacketId: {msg.PacketId}");
                         break;
                     case MsgType.ConnectAck:
-                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
+                        PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
                         _logger.Log(LogLevel.Info, $"In <= {msgType}");
                         break;
                     case MsgType.PublishAck:
                         var pubAck = new PublishAck(packet.ToArray());
                         _logger.Log(LogLevel.Info, $"In <= {msgType} PacketId: {pubAck.PacketId}");
-                        PacketSyncSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
+                        PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
                         break;
                     default:
                         _logger.Log(LogLevel.Info, $"In <= {msgType}");
@@ -159,5 +163,21 @@ namespace RxMqtt.Client{
         private readonly Timer _keepAliveTimer;
 
         #endregion
+
+        private void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                //_writeDisposable?.Dispose();
+                _readWriteStream?.Dispose();
+                _keepAliveTimer?.Dispose();
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
     }
 }

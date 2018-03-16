@@ -19,7 +19,8 @@ namespace RxMqtt.Shared.Messages
     {
         internal static ILogger Logger { get; } = LogManager.GetCurrentClassLogger();
 
-        protected QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
+        public QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
+
         internal bool IsDuplicate { get; set; } = false;
 
         internal ushort PacketId { get; set; }// = GetNextPacketId();

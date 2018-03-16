@@ -26,9 +26,9 @@ namespace RxMqtt.Broker
 
         private readonly IReadWriteStream _readWriteStream;
 
-        private readonly ISubject<MqttMessage> _writeSyncSubject = new BehaviorSubject<MqttMessage>(null);
+        //private readonly ISubject<MqttMessage> _writeSyncSubject = new BehaviorSubject<MqttMessage>(null);
 
-        private readonly ISubject<MqttMessage> _writeSubject;
+        //private readonly ISubject<MqttMessage> _writeSubject;
 
         internal Client(Socket socket, ref CancellationTokenSource cancellationTokenSource)
         {
@@ -45,10 +45,14 @@ namespace RxMqtt.Broker
                 }
             });
 
-            _readWriteStream = new ReadWriteStream(new NetworkStream(socket), ProcessPackets, ref cancellationTokenSource);
+            _readWriteStream = new ReadWriteStream(new NetworkStream(socket), ref cancellationTokenSource);
 
-            _writeSubject = Subject.Synchronize(_writeSyncSubject);
-            _disposables.Add(_writeSubject.SubscribeOn(Scheduler.Default).Subscribe(OnNext));
+            //_writeSubject = Subject.Synchronize(_writeSyncSubject);
+
+            //_disposables.Add(_writeSubject.SubscribeOn(NewThreadScheduler.Default).Subscribe(OnNext));
+
+
+            _disposables.Add(_readWriteStream.PacketObservable.SubscribeOn(NewThreadScheduler.Default).Subscribe(ProcessPackets));
         }
 
         private void OnNext(MqttMessage buffer)
@@ -77,7 +81,7 @@ namespace RxMqtt.Broker
                     case MsgType.Publish:
                         var publishMsg = new Publish(buffer);
 
-                        _writeSubject.OnNext(new PublishAck(publishMsg.PacketId));
+                        _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
 
                         MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
                         break;
@@ -103,16 +107,16 @@ namespace RxMqtt.Broker
 
                         _readWriteStream.SetLogger(_logger);
 
-                        _writeSubject.OnNext(new ConnectAck());
+                        _readWriteStream.Write(new ConnectAck());
                         break;
                     case MsgType.PingRequest:
 
-                        _writeSubject.OnNext(new PingResponse());
+                        _readWriteStream.Write(new PingResponse());
                         break;
                     case MsgType.Subscribe:
                         var subscribeMsg = new Subscribe(buffer);
 
-                        _writeSubject.OnNext(new SubscribeAck(subscribeMsg.PacketId));
+                        _readWriteStream.Write(new SubscribeAck(subscribeMsg.PacketId));
 
                         Subscribe(subscribeMsg.Topics);
                         break;
@@ -155,7 +159,7 @@ namespace RxMqtt.Broker
 
                 //_logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
 
-                _disposables.Add(MqttBroker.Subscribe(topic).SubscribeOn(Scheduler.Default).Subscribe(_writeSubject.OnNext));
+                _disposables.Add(MqttBroker.Subscribe(topic).SubscribeOn(NewThreadScheduler.Default).Subscribe(OnNext));
             }
         }
     }

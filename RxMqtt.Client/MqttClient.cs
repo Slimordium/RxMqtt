@@ -12,7 +12,7 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client
 {
-    public class MqttClient
+    public class MqttClient : IDisposable
     {
         /// <summary>
         ///     MQTT client
@@ -39,6 +39,14 @@ namespace RxMqtt.Client
 
             _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+            cancellationToken.Register(() =>
+            {
+                foreach (var disposable in _disposables)
+                {
+                    disposable.Value?.Dispose();
+                }
+            });
+
             _connection = new TcpConnection(
                 brokerHostname,
                 keepAliveInSeconds,
@@ -47,10 +55,9 @@ namespace RxMqtt.Client
                 ref _cancellationTokenSource);
         }
 
-        private readonly CancellationTokenSource _cancellationTokenSource;
-    
         #region PrivateFields
 
+        private readonly CancellationTokenSource _cancellationTokenSource;
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private readonly string _connectionId;
         private readonly TcpConnection _connection;
@@ -77,12 +84,12 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"KeepAliveSeconds => {_keepAliveInSeconds}");
 
-            _connection.WriteSubject.OnNext(new Connect(_connectionId, _keepAliveInSeconds));
+            _connection.Write(new Connect(_connectionId, _keepAliveInSeconds));
 
             return _status;
         }
 
-        public async Task<PublishAck> PublishAsync(string message, string topic, TimeSpan timeout)
+        public async Task<PublishAck> PublishAsync(string message, string topic, TimeSpan timeout, QosLevel qosLevel = QosLevel.AtLeastOnce)
         {
             var messageToPublish = new Publish
             {
@@ -92,35 +99,25 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Info, $"Publishing string to => '{topic}'");
 
-            _connection.WriteSubject.OnNext(messageToPublish);
+            _connection.Write(messageToPublish);
+            var packetId = 0;
 
-            var packetEnvelope = await _connection.PacketSyncSubject
+            if (qosLevel == QosLevel.AtMostOnce)
+                return new PublishAck((ushort)packetId);
+
+            var packetEnvelope = await _connection.PacketSubject
                 .Timeout(timeout)
-                .SkipWhile(envelope =>
-                {
-                    if (envelope == null)
-                        return true;
-
-                    if (envelope.MsgType != MsgType.PublishAck)
-                        return true;
-
-                    return false;
-                })
-                .SubscribeOn(Scheduler.Default)
-                .SkipWhile(envelope =>
-                {
-                    if (envelope.PacketId != messageToPublish.PacketId)
-                        return true;
-
-                    return false;
-                })
+                .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
+                .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
                 .SubscribeOn(Scheduler.Default)
                 .Take(1);
 
-            return (PublishAck) packetEnvelope?.Message;
+            packetId = packetEnvelope.PacketId;
+
+            return new PublishAck((ushort)packetId);
         }
 
-        public async Task<PublishAck> PublishAsync(byte[] buffer, string topic, TimeSpan timeout)
+        public async Task<PublishAck> PublishAsync(byte[] buffer, string topic, TimeSpan timeout, QosLevel qosLevel = QosLevel.AtLeastOnce)
         {
             var messageToPublish = new Publish
             {
@@ -130,32 +127,23 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Info, $"Publishing bytes to => '{topic}'");
 
-            _connection.WriteSubject.OnNext(messageToPublish);
+            _connection.Write(messageToPublish);
 
-            var packetEnvelope = await _connection.PacketSyncSubject
+            var packetId = 0;
+
+            if (qosLevel == QosLevel.AtMostOnce)
+                return new PublishAck((ushort)packetId);
+
+            var packetEnvelope = await _connection.PacketSubject
                 .Timeout(timeout)
-                .SkipWhile(envelope =>
-                {
-                    if (envelope == null)
-                        return true;
-
-                    if (envelope.MsgType != MsgType.PublishAck)
-                        return true;
-
-                    return false;
-                })
-                .SubscribeOn(Scheduler.Default)
-                .SkipWhile(envelope =>
-                {
-                    if (envelope.PacketId != messageToPublish.PacketId)
-                        return true;
-
-                    return false;
-                })
+                .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
+                .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
                 .SubscribeOn(Scheduler.Default)
                 .Take(1);
 
-            return (PublishAck)packetEnvelope?.Message;
+            packetId = packetEnvelope.PacketId;
+
+            return new PublishAck((ushort)packetId);
         }
 
         /// <summary>
@@ -163,43 +151,95 @@ namespace RxMqtt.Client
         /// </summary>
         /// <param name="message"></param>
         /// <param name="topic"></param>
+        /// <param name="qos"></param>
+        /// <param name="qosLevel"></param>
         /// <returns></returns>
-        public async Task<PublishAck> PublishAsync(string message, string topic)
+        public async Task<PublishAck> PublishAsync(string message, string topic, QosLevel qosLevel = QosLevel.AtLeastOnce)
         {
             var messageToPublish = new Publish
             {
                 Topic = topic,
-                Message = Encoding.UTF8.GetBytes(message)
+                Message = Encoding.UTF8.GetBytes(message),
+                
             };
 
             _logger.Log(LogLevel.Info, $"Publishing to => '{topic}'");
 
-            _connection.WriteSubject.OnNext(messageToPublish);
+            _connection.Write(messageToPublish);
 
-            var packetEnvelope = await _connection.PacketSyncSubject
-                .Timeout(TimeSpan.FromSeconds(2))
-                .SkipWhile(envelope =>
+            var packetId = 0;
+
+            if (qosLevel == QosLevel.AtMostOnce)
+                return new PublishAck((ushort) packetId);
+
+            var packetEnvelope = await _connection.PacketSubject
+                .Timeout(TimeSpan.FromSeconds(3))
+                .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
+                .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
+                .SubscribeOn(Scheduler.Default)
+                .Take(1);
+
+            packetId = packetEnvelope.PacketId;
+
+            return new PublishAck((ushort) packetId);
+        }
+
+        public IObservable<string> GetPublishStringObservable(string topic)
+        {
+            var subscription = _connection.PacketSubject
+                .Where(publish =>
                 {
-                    if (envelope == null)
-                        return true;
+                    if (publish == null || publish.MsgType != MsgType.Publish)
+                        return false;
 
-                    if (envelope.MsgType != MsgType.PublishAck)
-                        return true;
+                    var msg = (Publish)publish.Message;
 
-                    return false;
+                    return msg != null && msg.Topic.StartsWith(topic);
                 })
                 .SubscribeOn(Scheduler.Default)
-                .SkipWhile(envelope =>
+                .Select(envelope =>
                 {
-                    if (envelope.PacketId != messageToPublish.PacketId)
-                        return true;
+                    var msg = (Publish)envelope.Message;
 
-                    return false;
+                    var s = Encoding.UTF8.GetString(msg.Message);
+
+                    return s;
+                });
+
+            if (!_disposables.ContainsKey(topic))
+                _disposables.Add(topic, null);
+
+            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+
+            return subscription;
+        }
+
+        public IObservable<byte[]> GetPublishByteObservable(string topic)
+        {
+            var subscription = _connection.PacketSubject
+                .Where(publish =>
+                {
+                    if (publish == null || publish.MsgType != MsgType.Publish)
+                        return false;
+
+                    var msg = (Publish)publish.Message;
+
+                    return msg != null && msg.Topic.StartsWith(topic);
                 })
                 .SubscribeOn(Scheduler.Default)
-                    .Take(1);
+                .Select(envelope =>
+                {
+                    var msg = (Publish)envelope.Message;
 
-            return (PublishAck) packetEnvelope?.Message;
+                    return msg.Message;
+                });
+
+            if (!_disposables.ContainsKey(topic))
+                _disposables.Add(topic, null);
+
+            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+
+            return subscription;
         }
 
         /// <summary>
@@ -216,21 +256,15 @@ namespace RxMqtt.Client
             }
 
             _disposables.Add(topic, 
-                _connection.PacketSyncSubject
-                .SubscribeOn(Scheduler.Default)
+                _connection.PacketSubject
                 .Where(publish =>
                     {
-                        if (publish != null && publish.MsgType == MsgType.Publish)
-                        {
-                            var msg = (Publish) publish.Message;
+                        if (publish == null || publish.MsgType != MsgType.Publish)
+                            return false;
 
-                            if (msg == null || !msg.Topic.StartsWith(topic))
-                                return false;
+                        var msg = (Publish)publish.Message;
 
-                            return true;
-                        }
-
-                        return false;
+                        return msg != null && msg.Topic.StartsWith(topic);
                     })
                 .SubscribeOn(Scheduler.Default)
                 .Subscribe(publish =>
@@ -240,7 +274,7 @@ namespace RxMqtt.Client
                         callback.Invoke(Encoding.UTF8.GetString(msg.Message)); 
                     }));
 
-            _connection.WriteSubject.OnNext(new Subscribe(_disposables.Keys.ToArray()));
+            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
         }
 
         public void Subscribe(Action<byte[]> callback, string topic)
@@ -252,21 +286,15 @@ namespace RxMqtt.Client
             }
 
             _disposables.Add(topic,
-                _connection.PacketSyncSubject
-                    .SubscribeOn(Scheduler.Default)
+                _connection.PacketSubject
                     .Where(publish =>
                     {
-                        if (publish != null && publish.MsgType == MsgType.Publish)
-                        {
-                            var msg = (Publish)publish.Message;
+                        if (publish == null || publish.MsgType != MsgType.Publish)
+                            return false;
 
-                            if (msg == null || !msg.Topic.StartsWith(topic))
-                                return false;
+                        var msg = (Publish)publish.Message;
 
-                            return true;
-                        }
-
-                        return false;
+                        return msg != null && msg.Topic.StartsWith(topic);
                     })
                     .SubscribeOn(Scheduler.Default)
                     .Subscribe(publish =>
@@ -276,7 +304,7 @@ namespace RxMqtt.Client
                         callback.Invoke(msg.Message);
                     }));
 
-            _connection.WriteSubject.OnNext(new Subscribe(_disposables.Keys.ToArray()));
+            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
         }
 
         public void Unsubscribe(string topic)
@@ -286,13 +314,19 @@ namespace RxMqtt.Client
             if (!_disposables.ContainsKey(topic))
                 return;
 
-            _disposables[topic].Dispose();
+            _disposables[topic]?.Dispose();
 
             _disposables.Remove(topic);
 
-            _connection.WriteSubject.OnNext(new Unsubscribe(new[] { topic }));
+            _connection.Write(new Unsubscribe(new[] { topic }));
         }
 
         #endregion
+
+        public void Dispose()
+        {
+            _connection?.Dispose();
+            _cancellationTokenSource?.Dispose();
+        }
     }
 }

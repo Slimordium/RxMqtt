@@ -86,7 +86,7 @@ namespace RxMqtt.Broker
             var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp);//
 
             listener.Bind(_ipEndPoint);
-            listener.Listen(20);
+            listener.Listen(150);
 
             while (!_cancellationToken.IsCancellationRequested)
             {
