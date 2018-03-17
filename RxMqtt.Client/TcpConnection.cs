@@ -12,12 +12,11 @@ using NLog;
 using RxMqtt.Shared;
 using RxMqtt.Shared.Messages;
 
-namespace RxMqtt.Client{
+namespace RxMqtt.Client
+{
     internal class TcpConnection : IDisposable
     {
         internal ISubject<PacketEnvelope> PacketSubject { get; }
-
-        //private IDisposable _writeDisposable;
 
         internal TcpConnection
         (
@@ -29,7 +28,6 @@ namespace RxMqtt.Client{
         )
         {
             PacketSubject = Subject.Synchronize(_packetSyncSubject);
-            //WriteSubject = Subject.Synchronize(_writeSyncSubject);
 
             _cancellationTokenSource = cancellationTokenSource;
 
@@ -76,9 +74,7 @@ namespace RxMqtt.Client{
               
                 _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true), ref _cancellationTokenSource);
 
-
                 _readDisposable = _readWriteStream.PacketObservable.SubscribeOn(Scheduler.Default).Subscribe(ProcessPackets);
-                //_writeDisposable = WriteSubject.SubscribeOn(NewThreadScheduler.Default).Subscribe(Write);
             }
             catch (Exception e)
             {
@@ -168,7 +164,6 @@ namespace RxMqtt.Client{
         {
             if (disposing)
             {
-                //_writeDisposable?.Dispose();
                 _readWriteStream?.Dispose();
                 _keepAliveTimer?.Dispose();
             }
