@@ -73,7 +73,7 @@ namespace RxMqtt.Broker
         {
             //This sends the message to the client attached to this _networkStream
 
-            if (buffer == null)
+            if (buffer == null || !_socket.Connected)
                 return;
 
             _readWriteStream.Write(buffer);

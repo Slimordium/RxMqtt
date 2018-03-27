@@ -73,7 +73,7 @@ namespace RxMqtt.Broker
             }
 
             _disposable = Observable
-                .Interval(TimeSpan.FromSeconds(5))
+                .Interval(TimeSpan.FromSeconds(3))
                 .SubscribeOn(NewThreadScheduler.Default)
                 .Subscribe(_ =>
                 {
