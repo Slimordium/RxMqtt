@@ -26,33 +26,47 @@ namespace RxMqtt.Broker
 
         private readonly IReadWriteStream _readWriteStream;
 
-        //private readonly ISubject<MqttMessage> _writeSyncSubject = new BehaviorSubject<MqttMessage>(null);
+        private readonly Socket _socket;
 
-        //private readonly ISubject<MqttMessage> _writeSubject;
+        private bool _disposed;
 
-        internal Client(Socket socket, ref CancellationTokenSource cancellationTokenSource)
+        internal Client(Socket socket)
         {
             while (!socket.Connected)
             {
                 Task.Delay(500).Wait();
             }
 
-            cancellationTokenSource.Token.Register(() =>
-            {
-                foreach (var disposable in _disposables)
-                {
-                    disposable.Dispose();
-                }
-            });
+            _socket = socket;
 
-            _readWriteStream = new ReadWriteStream(new NetworkStream(socket), ref cancellationTokenSource);
-
-            //_writeSubject = Subject.Synchronize(_writeSyncSubject);
-
-            //_disposables.Add(_writeSubject.SubscribeOn(NewThreadScheduler.Default).Subscribe(OnNext));
-
+            _readWriteStream = new ReadWriteStream(new NetworkStream(socket));
 
             _disposables.Add(_readWriteStream.PacketObservable.SubscribeOn(NewThreadScheduler.Default).Subscribe(ProcessPackets));
+        }
+
+        internal void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!disposing || _disposed) return;
+
+            _disposed = true;
+
+            foreach (var disposable in _disposables)
+            {
+                disposable.Dispose();
+            }
+
+            _readWriteStream.Dispose();
+        }
+
+        internal bool IsConnected()
+        {
+            return _socket.Connected;
         }
 
         private void OnNext(MqttMessage buffer)

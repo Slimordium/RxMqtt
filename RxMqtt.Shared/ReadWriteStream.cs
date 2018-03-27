@@ -17,16 +17,14 @@ namespace RxMqtt.Shared
         private ILogger _logger;
         private bool _disposed;
         private readonly NetworkStream _networkStream;
-        private readonly CancellationTokenSource _cancellationTokenSourceSource;
+        private readonly CancellationTokenSource _cancellationTokenSourceSource = new CancellationTokenSource();
 
         /// <summary>
         /// Complete messages will be passed to callback. If a read contains multiple messages, or partial messages, they will be assembled before the callback is invoked
         /// </summary>
         /// <param name="networkStream"></param>
-        /// <param name="cancellationTokenSource"></param>
-        internal ReadWriteStream(NetworkStream networkStream, ref CancellationTokenSource cancellationTokenSource)
+        internal ReadWriteStream(NetworkStream networkStream)
         {
-            _cancellationTokenSourceSource = cancellationTokenSource;
             _logger = LogManager.GetLogger($"ReadWriteStream-{DateTime.Now.Minute}.{DateTime.Now.Millisecond}");
 
             _networkStream = networkStream;
@@ -69,8 +67,6 @@ namespace RxMqtt.Shared
 
                     Buffer.BlockCopy(nb, 0, packetBuffer, offset, readLength);
 
-                    _logger.Log(LogLevel.Info, $"Packet read completed {packetBuffer.Length} bytes");
-
                     totalPacketLength = 0;
                     offset = 0;
                     readLength = 0;
@@ -94,35 +90,31 @@ namespace RxMqtt.Shared
 
                 switch (msgType)
                 {
+                    case MsgType.SubscribeAck:
+                        //tempBuffer = ReadBytes(2);
+
+                        //if (tempBuffer == null || !tempBuffer.Any())
+                        //{
+                        //    _cancellationTokenSourceSource.Cancel();
+                        //    break;
+                        //}
+
+                        //rxBuffer = new byte[3];
+                        //rxBuffer[0] = typeByte;
+                        //Buffer.BlockCopy(tempBuffer, 0, rxBuffer, 1, 2);
+
+                        //break;
                     case MsgType.Connect:
                     case MsgType.ConnectAck:
                     case MsgType.PublishAck:
-                        tempBuffer = ReadBytes(3);
-
-                        if (tempBuffer == null || !tempBuffer.Any())
-                            throw new NullReferenceException("tempBuffer");
-
-                        rxBuffer = new byte[4];
-                        rxBuffer[0] = typeByte;
-                        Buffer.BlockCopy(tempBuffer, 0, rxBuffer, 1, 3);
-
-                        break;
-                    case MsgType.SubscribeAck:
-                        tempBuffer = ReadBytes(2);
-
-                        if (tempBuffer == null || !tempBuffer.Any())
-                            throw new NullReferenceException("tempBuffer");
-
-                        rxBuffer = new byte[3];
-                        rxBuffer[0] = typeByte;
-                        Buffer.BlockCopy(tempBuffer, 0, rxBuffer, 1, 2);
-
-                        break;
                     case MsgType.PingRequest:
                         tempBuffer = ReadBytes(3);
 
                         if (tempBuffer == null || !tempBuffer.Any())
-                            throw new NullReferenceException("tempBuffer");
+                        {
+                            _cancellationTokenSourceSource.Cancel();
+                            break;
+                        }
 
                         rxBuffer = new byte[4];
                         rxBuffer[0] = typeByte;
@@ -132,7 +124,12 @@ namespace RxMqtt.Shared
                         tempBuffer = ReadBytes(1);
 
                         if (tempBuffer == null || !tempBuffer.Any())
-                            throw new NullReferenceException("tempBuffer");
+                        {
+                            _cancellationTokenSourceSource.Cancel();
+                            break;
+                        }
+
+                        totalPacketLength = 2;//It will always be 2
 
                         rxBuffer = new byte[2];
                         rxBuffer[0] = typeByte;
@@ -143,7 +140,10 @@ namespace RxMqtt.Shared
                         tempBuffer = ReadBytes(4);
 
                         if (tempBuffer == null || !tempBuffer.Any())
-                            throw new NullReferenceException("tempBuffer");
+                        {
+                            _cancellationTokenSourceSource.Cancel();
+                            break;
+                        }
 
                         rxBuffer = new byte[5];
                         rxBuffer[0] = typeByte;
@@ -154,7 +154,11 @@ namespace RxMqtt.Shared
                 if (rxBuffer == null || rxBuffer.Length == 0)
                 {
                     _logger.Log(LogLevel.Error, "rxBuffer was null or empty");
-                    throw new NullReferenceException("rxBuffer");
+
+                    if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                        _cancellationTokenSourceSource.Cancel();
+
+                    continue;
                 }
 
                 if (totalPacketLength == 0)
@@ -164,8 +168,6 @@ namespace RxMqtt.Shared
 
                 if (totalPacketLength <= rxBuffer.Length)
                 {
-                    _logger.Log(LogLevel.Info, $"Packet read completed {rxBuffer.Length} bytes");
-
                     totalPacketLength = 0;
                     offset = 0;
                     readLength = 0;
@@ -264,15 +266,16 @@ namespace RxMqtt.Shared
         
         private void Dispose(bool disposing)
         {
-            if (disposing && !_disposed)
-            {
-                _disposed = true;
+            if (!disposing || _disposed) return;
 
-                if (!_cancellationTokenSourceSource.IsCancellationRequested)
-                    _cancellationTokenSourceSource.Cancel();
+            _disposed = true;
 
-                PacketObservable = null;
-            }
+            if (!_cancellationTokenSourceSource.IsCancellationRequested)
+                _cancellationTokenSourceSource.Cancel();
+
+            _networkStream?.Dispose();
+
+            PacketObservable = null;
         }
 
         public void Dispose()

@@ -26,7 +26,7 @@ namespace RxMqtt.Client.Console
             if (string.IsNullOrEmpty(ip))
                 ip = "127.0.0.1";
 
-            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 60000, CancellationToken.None); // "172.16.0.244"
+            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883); // "172.16.0.244"
 
             _mqttClient.InitializeAsync().Wait();
 

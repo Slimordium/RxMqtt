@@ -4,8 +4,8 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <Platforms>AnyCPU;x64</Platforms>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.0.0-rc8</Version>
-    <Description>Partial implementation of QOS 1 MQTT client</Description>
+    <Version>1.0.0-rc9</Version>
+    <Description>QOS 1 MQTT 3.1.1 client</Description>
   </PropertyGroup>
 
   <ItemGroup>

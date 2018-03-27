@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reactive.Concurrency;
@@ -22,8 +23,6 @@ namespace RxMqtt.Broker
 
         private readonly ISubject<Publish> _publishSubject = new Subject<Publish>(); //Everyone pushes to this
 
-        readonly List<CancellationTokenSource> _cancellationTokenSources = new List<CancellationTokenSource>();
-
         readonly Dictionary<Guid, Client> _clients = new Dictionary<Guid, Client>();
 
         private readonly int _port = 1883;
@@ -33,6 +32,10 @@ namespace RxMqtt.Broker
         private bool _started;
 
         private CancellationToken _cancellationToken;
+
+        internal static ISubject<Publish> PublishSyncSubject;
+
+        private IDisposable _disposable;
 
         public MqttBroker()
         {
@@ -56,15 +59,10 @@ namespace RxMqtt.Broker
             _port = port;
         }
 
-        private static readonly List<IDisposable> _subscriptionDisposables = new List<IDisposable>();
-
-        internal static ISubject<Publish> PublishSyncSubject;
-
         internal static IObservable<Publish> Subscribe(string topic)
         {
             return PublishSyncSubject.SubscribeOn(Scheduler.Default).Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic));
         }
-
 
         public void StartListening(CancellationToken cancellationToken = default(CancellationToken))
         {
@@ -73,6 +71,36 @@ namespace RxMqtt.Broker
                 _logger.Log(LogLevel.Warn, $"Already running");
                 return;
             }
+
+            _disposable = Observable
+                .Interval(TimeSpan.FromSeconds(5))
+                .SubscribeOn(NewThreadScheduler.Default)
+                .Subscribe(_ =>
+                {
+                    var toRemove = new List<Guid>();
+
+                    foreach (var client in _clients.Where(c => !c.Value.IsConnected()))
+                    {
+                        try
+                        {
+                            toRemove.Add(client.Key);
+
+                            client.Value.Dispose();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.Log(LogLevel.Error, $"Error disposing client => '{e.Message}'");
+                        }
+                    }
+
+                    foreach (var guid in toRemove)
+                    {
+                        _clients.Remove(guid);
+                    }
+
+                    if (toRemove.Count > 0)
+                        _logger.Log(LogLevel.Debug, $"Disposed '{toRemove.Count}' clients");
+                });
 
             PublishSyncSubject = Subject.Synchronize(_publishSubject);
 
@@ -83,10 +111,10 @@ namespace RxMqtt.Broker
             _logger.Log(LogLevel.Info, $"Broker started on '{_ipAddress}:{_port}'");
 
             _ipEndPoint = new IPEndPoint(_ipAddress, _port);
-            var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp);//
+            var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
             listener.Bind(_ipEndPoint);
-            listener.Listen(150);
+            listener.Listen(50);
 
             while (!_cancellationToken.IsCancellationRequested)
             {
@@ -113,17 +141,8 @@ namespace RxMqtt.Broker
 
             socket.UseOnlyOverlappedIO = true;
             socket.Blocking = true;
-
-            var cuid = Guid.NewGuid();
-            var cts = new CancellationTokenSource();
-            cts.Token.Register(() =>
-            {
-                _clients.Remove(cuid);
-            });
-
-            _cancellationTokenSources.Add(cts);
-
-            _clients.Add(cuid, new Client(socket, ref cts));
+           
+            _clients.Add(Guid.NewGuid(), new Client(socket));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 

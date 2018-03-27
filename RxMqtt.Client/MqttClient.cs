@@ -21,15 +21,11 @@ namespace RxMqtt.Client
         /// <param name="connectionId"></param>
         /// <param name="brokerHostname"></param>
         /// <param name="port"></param>
-        /// <param name="cancellationToken"></param>
         /// <param name="keepAliveInSeconds">1200 max</param>
-        /// <param name="bufferLength">Sets the Rx/Tx buffer sizes and splits out-going messages into packets of this size</param>
         public MqttClient(
             string connectionId,
             string brokerHostname,
             int port,
-            int bufferLength,
-            CancellationToken cancellationToken,
             int keepAliveInSeconds = 1200)
         {
             _connectionId = connectionId;
@@ -37,27 +33,14 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"MQTT Client {connectionId}, {brokerHostname}");
 
-            _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-            cancellationToken.Register(() =>
-            {
-                foreach (var disposable in _disposables)
-                {
-                    disposable.Value?.Dispose();
-                }
-            });
-
             _connection = new TcpConnection(
                 brokerHostname,
                 keepAliveInSeconds,
-                port,
-                bufferLength,
-                ref _cancellationTokenSource);
+                port);
         }
 
         #region PrivateFields
 
-        private readonly CancellationTokenSource _cancellationTokenSource;
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private readonly string _connectionId;
         private readonly TcpConnection _connection;
@@ -323,10 +306,26 @@ namespace RxMqtt.Client
 
         #endregion
 
+        private bool _disposed;
+
         public void Dispose()
         {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!disposing || _disposed) return;
+
+            _disposed = true;
+
+            foreach (var disposable in _disposables)
+            {
+                disposable.Value?.Dispose();
+            }
+
             _connection?.Dispose();
-            _cancellationTokenSource?.Dispose();
         }
     }
 }

@@ -22,18 +22,13 @@ namespace RxMqtt.Client
         (
             string hostName,
             int keepAliveInSeconds,
-            int port,
-            int bufferLength,
-            ref CancellationTokenSource cancellationTokenSource
+            int port
         )
         {
             PacketSubject = Subject.Synchronize(_packetSyncSubject);
 
-            _cancellationTokenSource = cancellationTokenSource;
-
             _keepAliveInSeconds = (ushort) keepAliveInSeconds;
             _port = port;
-            _bufferLength = bufferLength;
             _hostName = hostName;
 
             _keepAliveTimer = new Timer(Ping);
@@ -72,7 +67,7 @@ namespace RxMqtt.Client
 
                 _status = Status.Initialized;
               
-                _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true), ref _cancellationTokenSource);
+                _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true));
 
                 _readDisposable = _readWriteStream.PacketObservable.SubscribeOn(Scheduler.Default).Subscribe(ProcessPackets);
             }
@@ -148,25 +143,20 @@ namespace RxMqtt.Client
 
         private Status _status = Status.Error;
         private readonly int _port;
-        private readonly int _bufferLength;
         private readonly ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
-        private readonly ISubject<MqttMessage> _writeSyncSubject = new BehaviorSubject<MqttMessage>(null);
 
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private IReadWriteStream _readWriteStream;
         private readonly string _hostName;
-        private CancellationTokenSource _cancellationTokenSource;
         private readonly Timer _keepAliveTimer;
 
         #endregion
 
         private void Dispose(bool disposing)
         {
-            if (disposing)
-            {
-                _readWriteStream?.Dispose();
-                _keepAliveTimer?.Dispose();
-            }
+            if (!disposing) return;
+            _readWriteStream?.Dispose();
+            _keepAliveTimer?.Dispose();
         }
 
         public void Dispose()
