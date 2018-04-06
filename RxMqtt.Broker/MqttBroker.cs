@@ -61,7 +61,7 @@ namespace RxMqtt.Broker
 
         internal static IObservable<Publish> Subscribe(string topic)
         {
-            return PublishSyncSubject.SubscribeOn(Scheduler.Default).Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic));
+            return PublishSyncSubject.Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).SubscribeOn(NewThreadScheduler.Default);
         }
 
         public void StartListening(CancellationToken cancellationToken = default(CancellationToken))

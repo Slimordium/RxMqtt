@@ -212,14 +212,19 @@ namespace RxMqtt.Shared
             WriteBytes(buffer);
         }
 
+        private BinaryWriter _binaryWriter;
+
         private void WriteBytes(byte[] buffer)
         {
+            if (_binaryWriter == null)
+                _binaryWriter = new BinaryWriter(_networkStream, Encoding.UTF8, true);
+
             try
             {
-                using (var writer = new BinaryWriter(_networkStream, Encoding.UTF8, true))
-                {
-                    writer.Write(buffer);
-                }
+                //using (var writer = new BinaryWriter(_networkStream, Encoding.UTF8, true))
+                //{
+                    _binaryWriter.Write(buffer);
+                //}
             }
             catch (Exception e)
             {
@@ -230,16 +235,21 @@ namespace RxMqtt.Shared
             }
         }
 
+        private BinaryReader _binaryReader;
+
         private byte[] ReadBytes(int bytesToRead)
         {
+            if (_binaryReader == null)
+                _binaryReader = new BinaryReader(_networkStream, Encoding.UTF8, true);
+
             byte[] buffer = null;
 
             try
             {
-                using (var br = new BinaryReader(_networkStream, Encoding.UTF8, true))
-                {
-                    buffer = br.ReadBytes(bytesToRead);
-                }
+                //using (var br = new BinaryReader(_networkStream, Encoding.UTF8, true))
+                //{
+                    buffer = _binaryReader.ReadBytes(bytesToRead);
+                //}
             }
             catch (Exception e)
             {

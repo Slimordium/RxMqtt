@@ -88,7 +88,7 @@ namespace RxMqtt.Broker
 
             try
             {
-                _logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
+                //_logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
 
                 switch (msgType)
                 {
