@@ -88,26 +88,15 @@ namespace RxMqtt.Shared
                 byte[] rxBuffer = null;
                 byte[] tempBuffer = null;
 
+                _logger.Log(LogLevel.Debug, $"In <= {msgType}");
+
                 switch (msgType)
                 {
                     case MsgType.SubscribeAck:
-                        //tempBuffer = ReadBytes(2);
-
-                        //if (tempBuffer == null || !tempBuffer.Any())
-                        //{
-                        //    _cancellationTokenSourceSource.Cancel();
-                        //    break;
-                        //}
-
-                        //rxBuffer = new byte[3];
-                        //rxBuffer[0] = typeByte;
-                        //Buffer.BlockCopy(tempBuffer, 0, rxBuffer, 1, 2);
-
-                        //break;
                     case MsgType.Connect:
                     case MsgType.ConnectAck:
                     case MsgType.PublishAck:
-                    case MsgType.PingRequest:
+                    
                         tempBuffer = ReadBytes(3);
 
                         if (tempBuffer == null || !tempBuffer.Any())
@@ -120,6 +109,7 @@ namespace RxMqtt.Shared
                         rxBuffer[0] = typeByte;
                         Buffer.BlockCopy(tempBuffer, 0, rxBuffer, 1, 3);
                         break;
+                    case MsgType.PingRequest:
                     case MsgType.PingResponse:
                         tempBuffer = ReadBytes(1);
 
@@ -221,10 +211,8 @@ namespace RxMqtt.Shared
 
             try
             {
-                //using (var writer = new BinaryWriter(_networkStream, Encoding.UTF8, true))
-                //{
-                    _binaryWriter.Write(buffer);
-                //}
+                _binaryWriter.Write(buffer);
+                //_binaryWriter.Flush();
             }
             catch (Exception e)
             {

@@ -4,7 +4,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <Platforms>AnyCPU;x64;x64</Platforms>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.0.0-rc11</Version>
+    <Version>1.0.0.1</Version>
     <Description>Interfaces and shared models for RxMqtt client and broker</Description>
   </PropertyGroup>
 

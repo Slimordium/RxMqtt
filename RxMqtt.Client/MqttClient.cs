@@ -35,7 +35,6 @@ namespace RxMqtt.Client
 
             _connection = new TcpConnection(
                 brokerHostname,
-                keepAliveInSeconds,
                 port);
         }
 
@@ -47,6 +46,7 @@ namespace RxMqtt.Client
         private ushort _keepAliveInSeconds;
         private Status _status = Status.Error;
         private readonly Dictionary<string, IDisposable> _disposables = new Dictionary<string, IDisposable>();
+        private Timer _keepAliveTimer;
 
         #endregion
 
@@ -69,7 +69,20 @@ namespace RxMqtt.Client
 
             _connection.Write(new Connect(_connectionId, _keepAliveInSeconds));
 
+            _keepAliveTimer = new Timer(Ping);
+            _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
+
             return _status;
+        }
+
+        private async void Ping(object sender)
+        {
+            _connection.Write(new PingMsg());
+
+
+            //var pingResponse = await _connection.PacketSubject.Where(envelope => envelope.MsgType == MsgType.PingResponse).Take(1);
+
+            _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
         }
 
         public async Task<PublishAck> PublishAsync(string message, string topic, TimeSpan timeout, QosLevel qosLevel = QosLevel.AtLeastOnce)
@@ -92,7 +105,7 @@ namespace RxMqtt.Client
                 .Timeout(timeout)
                 .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
                 .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
-                .SubscribeOn(Scheduler.Default)
+                .ObserveOn(Scheduler.Default)
                 .Take(1);
 
             packetId = packetEnvelope.PacketId;
@@ -121,7 +134,7 @@ namespace RxMqtt.Client
                 .Timeout(timeout)
                 .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
                 .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
-                .SubscribeOn(Scheduler.Default)
+                .ObserveOn(Scheduler.Default)
                 .Take(1);
 
             packetId = packetEnvelope.PacketId;
@@ -159,7 +172,7 @@ namespace RxMqtt.Client
                 .Timeout(TimeSpan.FromSeconds(3))
                 .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
                 .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
-                .SubscribeOn(Scheduler.Default)
+                .ObserveOn(Scheduler.Default)
                 .Take(1);
 
             packetId = packetEnvelope.PacketId;
@@ -179,7 +192,7 @@ namespace RxMqtt.Client
 
                     return msg != null && msg.Topic.StartsWith(topic);
                 })
-                .SubscribeOn(Scheduler.Default)
+                .ObserveOn(Scheduler.Default)
                 .Select(envelope =>
                 {
                     var msg = (Publish)envelope.Message;
@@ -209,7 +222,7 @@ namespace RxMqtt.Client
 
                     return msg != null && msg.Topic.StartsWith(topic);
                 })
-                .SubscribeOn(Scheduler.Default)
+                .ObserveOn(Scheduler.Default)
                 .Select(envelope =>
                 {
                     var msg = (Publish)envelope.Message;
@@ -249,7 +262,7 @@ namespace RxMqtt.Client
 
                         return msg != null && msg.Topic.StartsWith(topic);
                     })
-                .SubscribeOn(Scheduler.Default)
+                .ObserveOn(Scheduler.Default)
                 .Subscribe(publish =>
                     {
                         var msg = (Publish) publish.Message;
@@ -279,7 +292,7 @@ namespace RxMqtt.Client
 
                         return msg != null && msg.Topic.StartsWith(topic);
                     })
-                    .SubscribeOn(Scheduler.Default)
+                    .ObserveOn(Scheduler.Default)
                     .Subscribe(publish =>
                     {
                         var msg = (Publish)publish.Message;
@@ -326,6 +339,8 @@ namespace RxMqtt.Client
             }
 
             _connection?.Dispose();
+
+            _keepAliveTimer?.Dispose();
         }
     }
 }

@@ -5,8 +5,6 @@ using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
@@ -16,23 +14,16 @@ namespace RxMqtt.Client
 {
     internal class TcpConnection : IDisposable
     {
-        internal ISubject<PacketEnvelope> PacketSubject { get; }
-
         internal TcpConnection
         (
             string hostName,
-            int keepAliveInSeconds,
             int port
         )
         {
             PacketSubject = Subject.Synchronize(_packetSyncSubject);
 
-            _keepAliveInSeconds = (ushort) keepAliveInSeconds;
             _port = port;
             _hostName = hostName;
-
-            _keepAliveTimer = new Timer(Ping);
-            _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
         }
 
         public async Task<Status> Initialize()
@@ -69,7 +60,7 @@ namespace RxMqtt.Client
               
                 _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true));
 
-                _readDisposable = _readWriteStream.PacketObservable.SubscribeOn(Scheduler.Default).Subscribe(ProcessPackets);
+                _readDisposable = _readWriteStream.PacketObservable.SubscribeOn(NewThreadScheduler.Default).Subscribe(ProcessPackets);
             }
             catch (Exception e)
             {
@@ -80,8 +71,6 @@ namespace RxMqtt.Client
 
             return _status;
         }
-
-        private IDisposable _readDisposable;
 
         public void Write(MqttMessage mqttMessage)
         {
@@ -130,33 +119,26 @@ namespace RxMqtt.Client
             }
         }
 
-        private void Ping(object sender)
-        {
-            _readWriteStream.Write(new PingMsg());
-            _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
-        }
-
         #region PrivateFields
 
         private IPAddress _ipAddress;
-        private readonly ushort _keepAliveInSeconds;
-
         private Status _status = Status.Error;
         private readonly int _port;
         private readonly ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
-
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private IReadWriteStream _readWriteStream;
         private readonly string _hostName;
-        private readonly Timer _keepAliveTimer;
+        private IDisposable _readDisposable;
+        internal ISubject<PacketEnvelope> PacketSubject { get; }
 
         #endregion
 
         private void Dispose(bool disposing)
         {
             if (!disposing) return;
+
+            _readDisposable?.Dispose();
             _readWriteStream?.Dispose();
-            _keepAliveTimer?.Dispose();
         }
 
         public void Dispose()
