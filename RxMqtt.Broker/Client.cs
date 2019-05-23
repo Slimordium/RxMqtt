@@ -28,7 +28,9 @@ namespace RxMqtt.Broker
 
         private readonly Socket _socket;
 
-        private bool _disposed;
+        internal bool Disposed { get; set; }
+
+        private Timer _heartbeatTimer;
 
         internal Client(Socket socket)
         {
@@ -41,8 +43,15 @@ namespace RxMqtt.Broker
 
             _readWriteStream = new ReadWriteStream(new NetworkStream(socket));
 
-            _disposables.Add(_readWriteStream.PacketObservable.SubscribeOn(NewThreadScheduler.Default).Subscribe(ProcessPackets));
+            _disposables.Add(_readWriteStream.PacketObservable.SubscribeOn(_readEventLoopScheduler).Subscribe(ProcessPackets));
         }
+
+        private void HeartbeatCallback(object state)
+        {
+            Dispose();
+        }
+
+        private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
 
         internal void Dispose()
         {
@@ -52,9 +61,9 @@ namespace RxMqtt.Broker
 
         private void Dispose(bool disposing)
         {
-            if (!disposing || _disposed) return;
+            if (!disposing || Disposed) return;
 
-            _disposed = true;
+            Disposed = true;
 
             foreach (var disposable in _disposables)
             {
@@ -79,10 +88,14 @@ namespace RxMqtt.Broker
             _readWriteStream.Write(buffer);
         }
 
+        private int _keepAliveSeconds;
+
         private void ProcessPackets(byte[] buffer)
         {
             if (buffer == null || buffer.Length <= 1)
                 return;
+
+            _heartbeatTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
             var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
 
@@ -102,20 +115,15 @@ namespace RxMqtt.Broker
                     case MsgType.Connect:
                         var connectMsg = new Connect(buffer);
 
+                        _keepAliveSeconds = connectMsg.KeepAlivePeriod;
+
                         _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
                         _clientId = connectMsg.ClientId;
 
-                        //_keepAliveDisposable?.Dispose();
+                        _heartbeatTimer = new Timer(HeartbeatCallback, null, TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
 
-                        //_keepAliveDisposable = Observable.Interval(TimeSpan.FromSeconds(connectMsg.KeepAlivePeriod + connectMsg.KeepAlivePeriod / 2)).Subscribe(_ =>
-                        //{
-                        //    if (Interlocked.Exchange(ref _shouldCancel, 1) != 1) return;
-
-                        //    _logger.Log(LogLevel.Warn, "Client appears to be disconnected, dropping connection");
-
-                        //    _cancellationTokenSource.Cancel(false);
-                        //});
+                        _heartbeatTimer.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
                         _logger = LogManager.GetLogger(_clientId);
 

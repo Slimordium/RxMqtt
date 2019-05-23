@@ -5,7 +5,8 @@ using System.Threading.Tasks;
 namespace RxMqtt.Client.Console
 {
 
-    class Program{
+    class Program
+    {
         private static MqttClient _mqttClient;
 
         static async Task Main(string[] args)
@@ -26,7 +27,7 @@ namespace RxMqtt.Client.Console
             if (string.IsNullOrEmpty(ip))
                 ip = "127.0.0.1";
 
-            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 60); // "172.16.0.244"
+            _mqttClient = new MqttClient(clientId.Trim(), ip.Trim(), 1883, 5); // "172.16.0.244"
 
             var s = await _mqttClient.InitializeAsync();
 

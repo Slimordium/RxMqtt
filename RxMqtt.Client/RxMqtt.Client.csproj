@@ -1,21 +1,28 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-    <Platforms>AnyCPU;x64</Platforms>
+    <TargetFrameworks>netstandard2.0;net46;netcoreapp2.0</TargetFrameworks>
+    <Platforms>AnyCPU;x64;ARM</Platforms>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.0.0.1</Version>
+    <Version>1.2.0.3</Version>
     <Description>QOS 1 MQTT 3.1.1 client</Description>
+    <LangVersion>7.1</LangVersion>
+    <AssemblyVersion>1.2.0.3</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NLog" Version="4.5.0-rc04" />
+    <PackageReference Include="NLog" Version="4.6.3" />
+    <PackageReference Include="System.Net.Sockets" Version="4.3.0" />
     <PackageReference Include="System.Net.WebSockets.Client" Version="4.3.2" />
-    <PackageReference Include="System.Reactive" Version="3.1.1" />
+    <PackageReference Include="System.Reactive" Version="4.1.5" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\RxMqtt.Shared\RxMqtt.Shared.csproj" />
   </ItemGroup>
+  
+  <PropertyGroup>
+	<DebugType>Full</DebugType>
+  </PropertyGroup>
 
 </Project>

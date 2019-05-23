@@ -212,7 +212,6 @@ namespace RxMqtt.Shared
             try
             {
                 _binaryWriter.Write(buffer);
-                //_binaryWriter.Flush();
             }
             catch (Exception e)
             {

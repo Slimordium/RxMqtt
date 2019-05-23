@@ -51,7 +51,7 @@ namespace RxMqtt.Client
                     Blocking = true,
                 };
 
-                await socket.ConnectAsync(new IPEndPoint(_ipAddress, _port));
+                await socket.ConnectAsync(new System.Net.IPEndPoint(_ipAddress, _port));
 
                 if (!socket.Connected)
                     return Status.SocketError;
