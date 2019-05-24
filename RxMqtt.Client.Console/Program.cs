@@ -1,4 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,6 +11,8 @@ namespace RxMqtt.Client.Console
     class Program
     {
         private static MqttClient _mqttClient;
+
+        private static List<IDisposable> _disposables = new List<IDisposable>();
 
         static async Task Main(string[] args)
         {
@@ -47,7 +52,7 @@ namespace RxMqtt.Client.Console
 
                 if (line.StartsWith("q"))
                 {
-                    _mqttClient.Dispose();
+                    _mqttClient?.Dispose();
                     return;
                 }
 
@@ -59,12 +64,13 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(line))
                         continue;
 
-                    //_mqttClient.Subscribe(Handler, line.Trim());
-
-                    _mqttClient.GetPublishStringObservable(line.Trim()).Subscribe(m =>
-                    {
-                        Handler($"In '{line}' => {m}");
-                    });
+                    _disposables.Add(_mqttClient
+                        .GetPublishStringObservable(line.Trim())
+                        .ObserveOn(Scheduler.Default)
+                        .Subscribe(m =>
+                        {
+                            Handler($"In - Topic: '{line}' => '{m}'");
+                        }));
 
                     System.Console.WriteLine("subscribed");
                 }
@@ -86,12 +92,9 @@ namespace RxMqtt.Client.Console
                 if (string.IsNullOrEmpty(count))
                     count = "1";
 
-                await Publish(msg, topic, count);
-
-                System.Console.WriteLine("published");
+                await Publish(msg, topic, count); 
             }
         }
-
 
         /// <summary>
         /// Throws timeout exception after 2 seconds
@@ -109,7 +112,7 @@ namespace RxMqtt.Client.Console
                 parsedCount = 1;
             }
 
-            for (var i = 1; i <= parsedCount; i++)
+            for (var i = 0; i < parsedCount; i++)
             {
                 try
                 {
@@ -120,7 +123,9 @@ namespace RxMqtt.Client.Console
                     System.Console.WriteLine(e.Message);
                     return;
                 }
-            }
+            };
+
+            System.Console.WriteLine($"Completed {count}");
         }
 
         private static void Handler(string s)
