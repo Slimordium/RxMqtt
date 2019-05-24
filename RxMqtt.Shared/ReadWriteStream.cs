@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
-using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
@@ -12,17 +11,17 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared
 {
-    internal class ReadWriteStream : IReadWriteStream
+    internal class ReadWriteStream
     {
         private ILogger _logger;
         private bool _disposed;
         private readonly NetworkStream _networkStream;
         private readonly CancellationTokenSource _cancellationTokenSourceSource = new CancellationTokenSource();
+        private BinaryWriter _binaryWriter;
+        private BinaryReader _binaryReader;
 
-        /// <summary>
-        /// Complete messages will be passed to callback. If a read contains multiple messages, or partial messages, they will be assembled before the callback is invoked
-        /// </summary>
-        /// <param name="networkStream"></param>
+        public IObservable<byte[]> PacketObservable { get; private set; }
+
         internal ReadWriteStream(NetworkStream networkStream)
         {
             _logger = LogManager.GetLogger($"ReadWriteStream-{DateTime.Now.Minute}.{DateTime.Now.Millisecond}");
@@ -31,8 +30,6 @@ namespace RxMqtt.Shared
 
             PacketObservable = PacketEnumerable().ToObservable();
         }
-
-        public IObservable<byte[]> PacketObservable { get; private set; }
 
         public void SetLogger(ILogger logger)
         {
@@ -202,8 +199,6 @@ namespace RxMqtt.Shared
             WriteBytes(buffer);
         }
 
-        private BinaryWriter _binaryWriter;
-
         private void WriteBytes(byte[] buffer)
         {
             if (_binaryWriter == null)
@@ -222,8 +217,6 @@ namespace RxMqtt.Shared
             }
         }
 
-        private BinaryReader _binaryReader;
-
         private byte[] ReadBytes(int bytesToRead)
         {
             if (_binaryReader == null)
@@ -233,10 +226,7 @@ namespace RxMqtt.Shared
 
             try
             {
-                //using (var br = new BinaryReader(_networkStream, Encoding.UTF8, true))
-                //{
-                    buffer = _binaryReader.ReadBytes(bytesToRead);
-                //}
+                buffer = _binaryReader.ReadBytes(bytesToRead);
             }
             catch (Exception e)
             {
@@ -249,11 +239,6 @@ namespace RxMqtt.Shared
             return buffer;
         }
 
-        /// <summary>
-        /// Either returns a complete packet with the bool set to true, or a partial packet with the bool set to false
-        /// </summary>
-        /// <param name="buffer"></param>
-        /// <returns></returns>
         private static int GetMessageLength(IReadOnlyList<byte> buffer)
         {
             var decodeValue = MqttMessage.DecodeValue(buffer, 1);

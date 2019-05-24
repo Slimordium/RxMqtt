@@ -74,8 +74,8 @@ namespace RxMqtt.Shared.Messages
                 }
                 catch (Exception e)
                 {
-                    Logger.Log(LogLevel.Error, e);
-                    Logger.Log(LogLevel.Error, $"{Encoding.UTF8.GetString(buffer)}");
+                    //Logger.Log(LogLevel.Error, e);
+                    //Logger.Log(LogLevel.Error, $"{Encoding.UTF8.GetString(buffer)}");
                     break;
                 }
             }
@@ -150,6 +150,5 @@ namespace RxMqtt.Shared.Messages
             
             return buffer;
         }
-
     }
 }

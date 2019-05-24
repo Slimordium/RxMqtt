@@ -189,7 +189,7 @@ namespace RxMqtt.Client
 
                     var msg = (Publish)publish.Message;
 
-                    return msg != null && msg.Topic.StartsWith(topic);
+                    return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
                 })
                 .ObserveOn(Scheduler.Default)
                 .Select(envelope =>
@@ -219,7 +219,7 @@ namespace RxMqtt.Client
 
                     var msg = (Publish)publish.Message;
 
-                    return msg != null && msg.Topic.StartsWith(topic);
+                    return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
                 })
                 .ObserveOn(Scheduler.Default)
                 .Select(envelope =>
@@ -259,7 +259,7 @@ namespace RxMqtt.Client
 
                         var msg = (Publish)publish.Message;
 
-                        return msg != null && msg.Topic.StartsWith(topic);
+                        return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
                     })
                 .ObserveOn(Scheduler.Default)
                 .Subscribe(publish =>
@@ -289,7 +289,7 @@ namespace RxMqtt.Client
 
                         var msg = (Publish)publish.Message;
 
-                        return msg != null && msg.Topic.StartsWith(topic);
+                        return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
                     })
                     .ObserveOn(Scheduler.Default)
                     .Subscribe(publish =>

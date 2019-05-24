@@ -17,7 +17,12 @@ namespace RxMqtt.Shared.Messages
     /// </summary>
     public abstract class MqttMessage
     {
-        internal static ILogger Logger { get; } = LogManager.GetCurrentClassLogger();
+        //static MqttMessage()
+        //{
+        //    Logger = LogManager.GetCurrentClassLogger();
+        //}
+
+        //internal static ILogger Logger { get; }
 
         public QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
 
@@ -27,20 +32,20 @@ namespace RxMqtt.Shared.Messages
 
         internal MsgType MsgType { get; set; } = MsgType.Publish;
 
-        private static ushort _messageIdCounter = 1;
+        private static volatile ushort _messageIdCounter = 1;
 
-        private static readonly object _idLock = new object();
+        //private static readonly object _idLock = new object();
 
         internal static ushort GetNextPacketId()
         {
-            lock (_idLock)
-            {
+            //lock (_idLock)
+            //{
                 if (_messageIdCounter >= ushort.MaxValue - 1)
                     _messageIdCounter = 1;
                 else
                     _messageIdCounter++;
                 return _messageIdCounter;
-            }
+            //}
         }
 
         protected MqttMessage()

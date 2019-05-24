@@ -126,7 +126,7 @@ namespace RxMqtt.Client
         private readonly int _port;
         private readonly ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
-        private IReadWriteStream _readWriteStream;
+        private ReadWriteStream _readWriteStream;
         private readonly string _hostName;
         private IDisposable _readDisposable;
         internal ISubject<PacketEnvelope> PacketSubject { get; }

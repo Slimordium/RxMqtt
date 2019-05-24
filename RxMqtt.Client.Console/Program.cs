@@ -61,7 +61,10 @@ namespace RxMqtt.Client.Console
 
                     //_mqttClient.Subscribe(Handler, line.Trim());
 
-                    _mqttClient.GetPublishStringObservable(line.Trim()).Subscribe(Handler);
+                    _mqttClient.GetPublishStringObservable(line.Trim()).Subscribe(m =>
+                    {
+                        Handler($"In '{line}' => {m}");
+                    });
 
                     System.Console.WriteLine("subscribed");
                 }
@@ -122,9 +125,9 @@ namespace RxMqtt.Client.Console
 
         private static void Handler(string s)
         {
-            if (s.Length < 1500)
+            if (s.Length < 2500)
             {
-                System.Console.WriteLine($"In => {s}");
+                System.Console.WriteLine(s);
             }
             else
             {

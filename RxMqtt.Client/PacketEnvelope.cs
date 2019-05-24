@@ -1,6 +1,7 @@
-﻿using RxMqtt.Shared.Messages;
+﻿using RxMqtt.Shared;
+using RxMqtt.Shared.Messages;
 
-namespace RxMqtt.Shared{
+namespace RxMqtt.Client{
     internal class PacketEnvelope
     {
         public MsgType MsgType { get; set; }

@@ -5,7 +5,6 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
-using System.Reactive.Subjects;
 using System.Threading;
 using System.Threading.Tasks;
 using NLog;
@@ -14,7 +13,7 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
 {
-    internal class Client
+    internal class ClientConnection
     {
         private string _clientId;
 
@@ -24,15 +23,17 @@ namespace RxMqtt.Broker
 
         private readonly List<IDisposable> _disposables = new List<IDisposable>();
 
-        private readonly IReadWriteStream _readWriteStream;
+        private readonly ReadWriteStream _readWriteStream;
 
         private readonly Socket _socket;
+
+        private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
 
         internal bool Disposed { get; set; }
 
         private Timer _heartbeatTimer;
 
-        internal Client(Socket socket)
+        internal ClientConnection(Socket socket)
         {
             while (!socket.Connected)
             {
@@ -50,8 +51,6 @@ namespace RxMqtt.Broker
         {
             Dispose();
         }
-
-        private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
 
         internal void Dispose()
         {
@@ -110,7 +109,7 @@ namespace RxMqtt.Broker
 
                         _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
 
-                        MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscirbed to the topic this was sent to
+                        MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscribed to the topic this was sent to
                         break;
                     case MsgType.Connect:
                         var connectMsg = new Connect(buffer);
@@ -154,8 +153,6 @@ namespace RxMqtt.Broker
             {
                 _logger.Log(LogLevel.Error, $"ProcessRead error '{e.Message}'");
             }
-
-            //Interlocked.Exchange(ref _shouldCancel, 0); //Reset after all incoming messages
         }
 
         private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic
@@ -167,21 +164,7 @@ namespace RxMqtt.Broker
 
                 _subscriptions.Add(topic);
 
-                //_topicSubject.OnNext(new KeyValuePair<string, string>(_clientId, topic));
-
-                //if (topic.EndsWith("#"))
-                //{
-                //    var newtopic = topic.Replace("#", "");
-                //    _disposables.Add(MqttBroker.PublishSyncSubject.SubscribeOn(Scheduler.Default).Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.StartsWith(newtopic)).Subscribe(OnNext));
-                //}
-                //else
-                //{
-                //    _disposables.Add(MqttBroker.PublishSyncSubject.Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic)).Subscribe(OnNext));
-                //}
-
-                //_logger.Log(LogLevel.Info, $"Subscribed to '{topic}'");
-
-                _disposables.Add(MqttBroker.Subscribe(topic).SubscribeOn(NewThreadScheduler.Default).Subscribe(OnNext));
+                _disposables.Add(MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
             }
         }
     }

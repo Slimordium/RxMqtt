@@ -17,13 +17,13 @@ namespace RxMqtt.Broker
     {
         private readonly AutoResetEvent _acceptConnectionResetEvent = new AutoResetEvent(false);
 
-        private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
+        private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
         private readonly IPAddress _ipAddress = IPAddress.Any;
 
         private readonly ISubject<Publish> _publishSubject = new Subject<Publish>(); //Everyone pushes to this
 
-        readonly Dictionary<Guid, Client> _clients = new Dictionary<Guid, Client>();
+        static readonly Dictionary<Guid, ClientConnection> _clients = new Dictionary<Guid, ClientConnection>();
 
         private readonly int _port = 1883;
 
@@ -43,7 +43,7 @@ namespace RxMqtt.Broker
         }
 
         /// <summary>
-        /// Recursivly handle read/write to all clients
+        /// Recursively handle read/write to all clients
         /// </summary>
         public MqttBroker(string ipAddress)
         {
@@ -62,8 +62,10 @@ namespace RxMqtt.Broker
         internal static IObservable<Publish> Subscribe(string topic)
         {
             return PublishSyncSubject
-                    .Where(m => m != null && m.MsgType == MsgType.Publish && m.Topic.Equals(topic))
-                    .ObserveOn(Scheduler.Default);
+                .Where(message => message != null 
+                                  && message.MsgType == MsgType.Publish 
+                                  && Utilities.IsTopicMatch(message.Topic, topic))
+                .ObserveOn(Scheduler.Default);
         }
 
         public void StartListening(CancellationToken cancellationToken = default(CancellationToken))
@@ -76,33 +78,8 @@ namespace RxMqtt.Broker
 
             _disposable = Observable
                 .Interval(TimeSpan.FromSeconds(3))
-                .SubscribeOn(NewThreadScheduler.Default)
-                .Subscribe(_ =>
-                {
-                    var toRemove = new List<Guid>();
-
-                    foreach (var client in _clients.Where(c => !c.Value.IsConnected()))
-                    {
-                        try
-                        {
-                            toRemove.Add(client.Key);
-
-                            client.Value.Dispose();
-                        }
-                        catch (Exception e)
-                        {
-                            _logger.Log(LogLevel.Error, $"Error disposing client => '{e.Message}'");
-                        }
-                    }
-
-                    foreach (var guid in toRemove)
-                    {
-                        _clients.Remove(guid);
-                    }
-
-                    if (toRemove.Count > 0)
-                        _logger.Log(LogLevel.Debug, $"Disposed '{toRemove.Count}' clients");
-                });
+                .ObserveOn(Scheduler.Default) //Was subscribe on NewThreadScheduler
+                .Subscribe(_ => DisposeDisconnectedClients());
 
             PublishSyncSubject = Subject.Synchronize(_publishSubject);
 
@@ -116,7 +93,7 @@ namespace RxMqtt.Broker
             var listener = new Socket(IPAddress.Any.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
             listener.Bind(_ipEndPoint);
-            listener.Listen(50);
+            listener.Listen(25);
 
             while (!_cancellationToken.IsCancellationRequested)
             {
@@ -144,11 +121,38 @@ namespace RxMqtt.Broker
             socket.UseOnlyOverlappedIO = true;
             socket.Blocking = true;
            
-            _clients.Add(Guid.NewGuid(), new Client(socket));
+            _clients.Add(Guid.NewGuid(), new ClientConnection(socket));
 
             _logger.Log(LogLevel.Trace, $"Client task created");
 
             _acceptConnectionResetEvent.Set();
+        }
+
+        private static void DisposeDisconnectedClients()
+        {
+            var toRemove = new List<Guid>();
+
+            foreach (var client in _clients.Where(c => !c.Value.IsConnected()))
+            {
+                try
+                {
+                    toRemove.Add(client.Key);
+
+                    client.Value.Dispose();
+                }
+                catch (Exception e)
+                {
+                    _logger.Log(LogLevel.Error, $"Error disposing client => '{e.Message}'");
+                }
+            }
+
+            foreach (var guid in toRemove)
+            {
+                _clients.Remove(guid);
+            }
+
+            if (toRemove.Count > 0)
+                _logger.Log(LogLevel.Debug, $"Disposed '{toRemove.Count}' clients");
         }
     }
 }
