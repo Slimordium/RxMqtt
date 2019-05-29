@@ -31,6 +31,8 @@ namespace RxMqtt.Broker
 
         internal bool Disposed { get; set; }
 
+        private int _keepAliveSeconds;
+
         private Timer _heartbeatTimer;
 
         internal ClientConnection(Socket socket)
@@ -79,16 +81,12 @@ namespace RxMqtt.Broker
 
         private void OnNext(MqttMessage buffer)
         {
-            //This sends the message to the client attached to this _networkStream
-
             if (buffer == null || !_socket.Connected)
                 return;
 
             _readWriteStream.Write(buffer);
         }
-
-        private int _keepAliveSeconds;
-
+        
         private void ProcessPackets(byte[] buffer)
         {
             if (buffer == null || buffer.Length <= 1)
@@ -100,8 +98,6 @@ namespace RxMqtt.Broker
 
             try
             {
-                //_logger.Log(LogLevel.Trace, $"In <= '{msgType}'");
-
                 switch (msgType)
                 {
                     case MsgType.Publish:
