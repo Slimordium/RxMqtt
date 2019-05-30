@@ -8,24 +8,24 @@ using RxMqtt.Shared.Enums;
 
 namespace RxMqtt.Shared.Messages
 {
-    internal class SubscribeAck : MqttMessage
+    internal class UnsubscribeAck : MqttMessage
     {
-        public SubscribeAck(ushort packetId)
+        public UnsubscribeAck(ushort packetId)
         {
-            MsgType = MsgType.SubscribeAck;
+            MsgType = MsgType.UnsubscribeAck;
             PacketId = packetId;
         }
 
-        public SubscribeAck(IReadOnlyList<byte> buffer)
+        public UnsubscribeAck(IReadOnlyList<byte> buffer)
         {
-            MsgType = MsgType.SubscribeAck;
+            MsgType = MsgType.UnsubscribeAck;
 
             PacketId = BytesToUshort(new[] { buffer[2], buffer[3] });
         }
 
         internal override byte[] GetBytes()
         {
-            var buffer = new List<byte> {((byte) MsgType.SubscribeAck << (byte) MsgOffset.Type) | 0x00};
+            var buffer = new List<byte> {((byte) MsgType.UnsubscribeAck << (byte) MsgOffset.Type) | 0x00};
 
             buffer.Add(0x03); //Remaining length
 

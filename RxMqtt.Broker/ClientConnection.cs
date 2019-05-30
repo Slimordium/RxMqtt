@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
+using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
@@ -22,6 +23,8 @@ namespace RxMqtt.Broker
         private readonly ConcurrentBag<string> _subscriptions = new ConcurrentBag<string>();
 
         private readonly List<IDisposable> _disposables = new List<IDisposable>();
+
+        private readonly Dictionary<string, IDisposable> _subscriptionDisposables = new Dictionary<string, IDisposable>();
 
         private readonly ReadWriteStream _readWriteStream;
 
@@ -137,6 +140,13 @@ namespace RxMqtt.Broker
 
                         Subscribe(subscribeMsg.Topics);
                         break;
+                    case MsgType.Unsubscribe:
+                        var unsubscribeMsg = new Unsubscribe(buffer);
+
+                        _readWriteStream.Write(new UnsubscribeAck(unsubscribeMsg.PacketId));
+
+                        Unsubscribe(unsubscribeMsg.Topics);
+                        break;
                     case MsgType.PublishAck:
                     case MsgType.Disconnect:
                         break;
@@ -151,8 +161,11 @@ namespace RxMqtt.Broker
             }
         }
 
-        private void Subscribe(IEnumerable<string> topics) //TODO: Support wild cards in topic path, like: mytopic/#/anothertopic
+        private void Subscribe(IEnumerable<string> topics)
         {
+            if (topics == null)
+                return;
+
             foreach (var topic in topics)
             {
                 if (_subscriptions.Contains(topic))
@@ -160,7 +173,22 @@ namespace RxMqtt.Broker
 
                 _subscriptions.Add(topic);
 
-                _disposables.Add(MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
+                _subscriptionDisposables.Add(topic, MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
+            }
+        }
+
+        private void Unsubscribe(IEnumerable<string> topics)
+        {
+            if (topics == null)
+                return;
+
+            foreach (var topic in topics)
+            {
+                var subscription = _subscriptionDisposables.FirstOrDefault(s => s.Key.Equals(topic));
+
+                subscription.Value?.Dispose();
+
+                _subscriptionDisposables.Remove(topic);
             }
         }
     }

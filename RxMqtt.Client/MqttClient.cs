@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
+using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client
@@ -168,7 +169,7 @@ namespace RxMqtt.Client
                 return new PublishAck((ushort) packetId);
 
             var packetEnvelope = await _connection.PacketSubject
-                .Timeout(TimeSpan.FromSeconds(3))
+                .Timeout(TimeSpan.FromSeconds(5))
                 .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
                 .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
                 .ObserveOn(Scheduler.Default)
@@ -179,62 +180,59 @@ namespace RxMqtt.Client
             return new PublishAck((ushort) packetId);
         }
 
-        public IObservable<string> GetPublishStringObservable(string topic)
+        public async Task<IObservable<string>> GetPublishStringObservable(string topic)
         {
-            var subscription = _connection.PacketSubject
-                .Where(publish =>
-                {
-                    if (publish == null || publish.MsgType != MsgType.Publish)
-                        return false;
-
-                    var msg = (Publish)publish.Message;
-
-                    return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
-                })
+            var subscription = _connection.PublishedMessageSubject
+                .Where(message => message.IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default)
-                .Select(envelope =>
-                {
-                    var msg = (Publish)envelope.Message;
-
-                    var s = Encoding.UTF8.GetString(msg.Message);
-
-                    return s;
-                });
+                .Select(publishedMessage => Encoding.UTF8.GetString(publishedMessage.Message));
 
             if (!_disposables.ContainsKey(topic))
                 _disposables.Add(topic, null);
 
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+            var msg = new Subscribe(_disposables.Keys.ToArray());
+
+            _connection.Write(msg);
+
+            if (!await WaitForAck(MsgType.SubscribeAck, msg.PacketId))
+                throw new TimeoutException();
 
             return subscription;
         }
 
+        public async Task<IObservable<Publish>> GetPublishObservable(string topic)
+        {
+            var publishObservable = _connection.PublishedMessageSubject
+                .Where(message => message.IsTopicMatch(topic))
+                .ObserveOn(Scheduler.Default)
+                .Select(publishedMessage => publishedMessage);
+
+            if (!_disposables.ContainsKey(topic))
+                _disposables.Add(topic, null);
+
+            var msg = new Subscribe(_disposables.Keys.ToArray());
+
+            _connection.Write(msg);
+
+            if (!await WaitForAck(MsgType.SubscribeAck, msg.PacketId))
+                throw new TimeoutException();
+
+            return publishObservable;
+        }
+
         public IObservable<byte[]> GetPublishByteObservable(string topic)
         {
-            var subscription = _connection.PacketSubject
-                .Where(publish =>
-                {
-                    if (publish == null || publish.MsgType != MsgType.Publish)
-                        return false;
-
-                    var msg = (Publish)publish.Message;
-
-                    return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
-                })
+            var publishByteObservable = _connection.PublishedMessageSubject
+                .Where(message => message.IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default)
-                .Select(envelope =>
-                {
-                    var msg = (Publish)envelope.Message;
-
-                    return msg.Message;
-                });
+                .Select(publishedMessage => publishedMessage.Message);
 
             if (!_disposables.ContainsKey(topic))
                 _disposables.Add(topic, null);
 
             _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
 
-            return subscription;
+            return publishByteObservable;
         }
 
         /// <summary>
@@ -242,67 +240,101 @@ namespace RxMqtt.Client
         /// </summary>
         /// <param name="callback"></param>
         /// <param name="topic"></param>
-        public void Subscribe(Action<string> callback, string topic)
+        public async Task<bool> Subscribe(Action<string> callback, string topic)
         {
             if (_disposables.ContainsKey(topic))
             {
                 _logger.Log(LogLevel.Warn, $"Already subscribed to '{topic}'");
-                return;
+                return await Task.FromResult(false);
             }
 
-            _disposables.Add(topic, 
-                _connection.PacketSubject
-                .Where(publish =>
-                    {
-                        if (publish == null || publish.MsgType != MsgType.Publish)
-                            return false;
-
-                        var msg = (Publish)publish.Message;
-
-                        return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
-                    })
-                .ObserveOn(Scheduler.Default)
-                .Subscribe(publish =>
-                    {
-                        var msg = (Publish) publish.Message;
-
-                        callback.Invoke(Encoding.UTF8.GetString(msg.Message)); 
-                    }));
-
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
-        }
-
-        public void Subscribe(Action<byte[]> callback, string topic)
-        {
-            if (_disposables.ContainsKey(topic))
+            if (!Shared.Messages.Subscribe.IsValidTopic(topic))
             {
-                _logger.Log(LogLevel.Warn, $"Already subscribed to '{topic}'");
-                return;
+                return await Task.FromResult(false);
             }
 
             _disposables.Add(topic,
-                _connection.PacketSubject
-                    .Where(publish =>
+                _connection.PublishedMessageSubject
+                .Where(message => message.IsTopicMatch(topic))
+                .ObserveOn(Scheduler.Default)
+                .Subscribe(publishedMessage =>
                     {
-                        if (publish == null || publish.MsgType != MsgType.Publish)
-                            return false;
-
-                        var msg = (Publish)publish.Message;
-
-                        return msg != null && Utilities.IsTopicMatch(msg.Topic, topic);
-                    })
-                    .ObserveOn(Scheduler.Default)
-                    .Subscribe(publish =>
-                    {
-                        var msg = (Publish)publish.Message;
-
-                        callback.Invoke(msg.Message);
+                        try
+                        {
+                            callback.Invoke(Encoding.UTF8.GetString(publishedMessage.Message));
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.Log(LogLevel.Error, $"Subscribe callback => {e}");
+                        }
                     }));
 
-            _connection.Write(new Subscribe(_disposables.Keys.ToArray()));
+            var subscribeMessage = new Subscribe(_disposables.Keys.ToArray());
+
+            _connection.Write(subscribeMessage);
+
+            return await WaitForAck(MsgType.SubscribeAck, subscribeMessage.PacketId);
         }
 
-        public void Unsubscribe(string topic)
+        private async Task<bool> WaitForAck(MsgType msgType, int packetId)
+        {
+            try
+            {
+                var subscribeAck = await _connection.PacketSubject
+                    .Timeout(TimeSpan.FromSeconds(5))
+                    .ObserveOn(Scheduler.Default)
+                    .Where(packetEnvelope =>
+                        packetEnvelope.MsgType == msgType &&
+                        packetEnvelope.PacketId == packetId)
+                    .Take(1);
+            }
+            catch (TimeoutException)
+            {
+                _logger.Log(LogLevel.Warn, $"Timed out waiting for {msgType}");
+
+                return await Task.FromResult(false);
+            }
+
+            return await Task.FromResult(true);
+        }
+
+        public async Task<bool> Subscribe(Action<byte[]> callback, string topic)
+        {
+            if (_disposables.ContainsKey(topic))
+            {
+                _logger.Log(LogLevel.Warn, $"Already subscribed to '{topic}'");
+                return await Task.FromResult(false);
+            }
+
+            if (!Shared.Messages.Subscribe.IsValidTopic(topic))
+            {
+                return await Task.FromResult(false);
+            }
+
+            _disposables.Add(topic,
+                _connection.PublishedMessageSubject
+                    .Where(message => message.IsTopicMatch(topic))
+                    .ObserveOn(Scheduler.Default)
+                    .Subscribe(publishedMessage =>
+                    {
+                        try
+                        {
+                            callback.Invoke(publishedMessage.Message);
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.Log(LogLevel.Error, $"Subscribe callback => {e}");
+                        }
+                    }));
+
+            var subscribeMessage = new Subscribe(_disposables.Keys.ToArray());
+
+            _connection.Write(subscribeMessage);
+
+            return await WaitForAck(MsgType.SubscribeAck, subscribeMessage.PacketId);
+        }
+
+        public async Task Unsubscribe(string topic)
         {
             _logger.Log(LogLevel.Trace, $"Unsubscribe from {topic}");
 
@@ -313,7 +345,11 @@ namespace RxMqtt.Client
 
             _disposables.Remove(topic);
 
-            _connection.Write(new Unsubscribe(new[] { topic }));
+            var unsubscribeMessage = new Unsubscribe(new[] {topic});
+
+            _connection.Write(unsubscribeMessage);
+
+            await WaitForAck(MsgType.UnsubscribeAck, unsubscribeMessage.PacketId);
         }
 
         #endregion

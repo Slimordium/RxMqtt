@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -59,20 +60,35 @@ namespace RxMqtt.Client.Console
                 if (line.StartsWith("s"))
                 {
                     System.Console.WriteLine("Topic:");
-                    line = System.Console.ReadLine();
+                    var subscribeTopic = System.Console.ReadLine();
 
-                    if (string.IsNullOrEmpty(line))
+                    if (string.IsNullOrEmpty(subscribeTopic))
                         continue;
 
-                    _disposables.Add(_mqttClient
-                        .GetPublishStringObservable(line.Trim())
-                        .ObserveOn(Scheduler.Default)
-                        .Subscribe(m =>
-                        {
-                            Handler($"In - Topic: '{line}' => '{m}'");
-                        }));
+                    //_disposables.Add(_mqttClient
+                    //    .GetPublishObservable(subscribeTopic.Trim())
+                    //    .ObserveOn(Scheduler.Default)
+                    //    .Subscribe(publishedMessage =>
+                    //    {
+                    //        Handler($"To topic: '{publishedMessage.Topic}' ({subscribeTopic}) => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
+                    //    }));
+
+                    await _mqttClient.Subscribe(Callback, subscribeTopic);
 
                     System.Console.WriteLine("subscribed");
+                }
+
+                if (line.StartsWith("u"))
+                {
+                    System.Console.WriteLine("Topic:");
+                    var unsubscribeTopic = System.Console.ReadLine();
+
+                    if (string.IsNullOrEmpty(unsubscribeTopic))
+                        continue;
+
+                    await _mqttClient.Unsubscribe(unsubscribeTopic);
+
+                    System.Console.WriteLine("unsubscribed");
                 }
 
                 if (!line.StartsWith("p"))
@@ -94,6 +110,11 @@ namespace RxMqtt.Client.Console
 
                 await Publish(msg, topic, count); 
             }
+        }
+
+        private static void Callback(string obj)
+        {
+            System.Console.WriteLine(obj);
         }
 
         /// <summary>

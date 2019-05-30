@@ -1,4 +1,4 @@
-﻿using RxMqtt.Shared;
+﻿using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client{

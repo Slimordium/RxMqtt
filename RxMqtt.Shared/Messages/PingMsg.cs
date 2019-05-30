@@ -1,5 +1,7 @@
 
 using System.Runtime.CompilerServices;
+using RxMqtt.Shared.Enums;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 

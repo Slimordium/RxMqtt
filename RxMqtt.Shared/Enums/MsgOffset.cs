@@ -1,9 +1,10 @@
 ﻿using System;
 using System.Runtime.CompilerServices;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 
-namespace RxMqtt.Shared
+namespace RxMqtt.Shared.Enums
 {
     [Flags]
     internal enum MsgOffset : byte

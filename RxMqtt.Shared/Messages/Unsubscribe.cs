@@ -2,8 +2,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Runtime.CompilerServices;
+using RxMqtt.Shared.Enums;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 
@@ -26,6 +29,49 @@ namespace RxMqtt.Shared.Messages
             MsgType = MsgType.Unsubscribe;
             Topics = topics;
             PacketId = GetNextPacketId();
+        }
+
+        internal Unsubscribe(IReadOnlyList<byte> buffer)
+        {
+            MsgType = MsgType.Unsubscribe;
+
+            var packetLength = DecodeValue(buffer, 1);
+
+            PacketId = BytesToUshort(new[] { buffer[packetLength.Item2 + 1], buffer[packetLength.Item2 + 2] });
+
+            var topics = new List<string>();
+
+            var topicLengthIndex = 5;//First topic length is at this index
+            var combinedTopicLengths = 0;
+
+            while (true)
+            {
+                try
+                {
+                    var topicLength = DecodeValue(buffer, topicLengthIndex).Item1;
+
+                    combinedTopicLengths += topicLength;
+
+                    var topicBuffer = new byte[topicLength];
+
+                    Buffer.BlockCopy(buffer.ToArray(), topicLengthIndex + 1, topicBuffer, 0, topicLength);
+
+                    topics.Add(Encoding.UTF8.GetString(topicBuffer));
+
+                    if (packetLength.Item1 - combinedTopicLengths <= topics.Count * 3 + 5)
+                        break;
+
+                    topicLengthIndex += topicLength + 3;
+                }
+                catch (Exception)
+                {
+                    //Logger.Log(LogLevel.Error, e);
+                    //Logger.Log(LogLevel.Error, $"{Encoding.UTF8.GetString(buffer)}");
+                    break;
+                }
+            }
+
+            Topics = topics.ToArray();
         }
         
         internal override byte[] GetBytes()

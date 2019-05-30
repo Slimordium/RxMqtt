@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 using NLog;
 using System.Runtime.CompilerServices;
+using RxMqtt.Shared.Enums;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 [assembly: InternalsVisibleTo("RxMqtt.Tests")]

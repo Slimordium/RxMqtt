@@ -2,6 +2,8 @@
 using System;
 using System.Text;
 using System.Runtime.CompilerServices;
+using RxMqtt.Shared.Enums;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 
@@ -20,9 +22,9 @@ namespace RxMqtt.Shared.Messages
         private const byte RetainFlagMask = 0x01;
         private const byte RetainFlagOffset = 0x00;
 
-        internal byte[] Message { get; set; } = new byte[1];
+        public byte[] Message { get; set; } = new byte[1];
 
-        internal string Topic { get; set; } = string.Empty;
+        public string Topic { get; set; } = string.Empty;
 
         internal bool Retain { get; set; }
 
@@ -45,7 +47,7 @@ namespace RxMqtt.Shared.Messages
 
         internal Publish(byte[] buffer)
         {
-            //First byte is the type of payload, so we can igrnore it
+            //First byte is the type of payload, so we can ignore it
             //The next 1 - 4 bytes (variable) determine packet length
             //The 2 bytes after that are the length of the topic
             //The 2 bytes after the topic are the Packet ID
@@ -111,6 +113,39 @@ namespace RxMqtt.Shared.Messages
                 Buffer.BlockCopy(Message, 0, packet, MessageStartOffset + encodedPacketSize.Length + topicLength.Length + topicBytes.Length + packetId.Length, Message.Length);
       
             return packet;
+        }
+
+        internal bool IsTopicMatch(string topicFilter)
+        {
+            if (string.IsNullOrEmpty(Topic))
+                return false;
+
+            var topicParts = Topic.Split('/');
+            var topicFilterParts = topicFilter.Split('/');
+
+            var loopCount = topicParts.Length;
+
+            //if (topicFilterParts.Length != topicParts.Length)
+            //{
+            //    return false;
+            //}
+
+            for (var i = 0; i < loopCount; i++)
+            {
+                if (topicParts[i].Contains("#") && i <= topicFilterParts.Length)
+                {
+                    return true;
+                }
+
+                if (!topicParts[i].Equals(topicFilterParts[i]) &&
+                    !topicFilterParts[i].Equals("#") &&
+                    !topicFilterParts[i].Equals("+"))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 }

@@ -7,20 +7,19 @@ using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
 using NLog;
+using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared
 {
     internal class ReadWriteStream
     {
-        private ILogger _logger;
-        private bool _disposed;
-        private readonly NetworkStream _networkStream;
         private readonly CancellationTokenSource _cancellationTokenSourceSource = new CancellationTokenSource();
-        private BinaryWriter _binaryWriter;
+        private readonly NetworkStream _networkStream;
         private BinaryReader _binaryReader;
-
-        public IObservable<byte[]> PacketObservable { get; private set; }
+        private BinaryWriter _binaryWriter;
+        private bool _disposed;
+        private ILogger _logger;
 
         internal ReadWriteStream(NetworkStream networkStream)
         {
@@ -30,6 +29,8 @@ namespace RxMqtt.Shared
 
             PacketObservable = PacketEnumerable().ToObservable();
         }
+
+        internal IObservable<byte[]> PacketObservable { get; private set; }
 
         public void SetLogger(ILogger logger)
         {
@@ -80,7 +81,7 @@ namespace RxMqtt.Shared
 
                 var typeByte = tempTypeByte[0];
 
-                var msgType = ((MsgType)(byte)((tempTypeByte[0] & 0xf0) >> (byte)MsgOffset.Type));
+                var msgType = (MsgType) (byte) ((tempTypeByte[0] & 0xf0) >> (byte) MsgOffset.Type);
 
                 byte[] rxBuffer = null;
                 byte[] tempBuffer = null;
@@ -90,10 +91,11 @@ namespace RxMqtt.Shared
                 switch (msgType)
                 {
                     case MsgType.SubscribeAck:
+                    case MsgType.UnsubscribeAck:
                     case MsgType.Connect:
                     case MsgType.ConnectAck:
                     case MsgType.PublishAck:
-                    
+
                         tempBuffer = ReadBytes(3);
 
                         if (tempBuffer == null || !tempBuffer.Any())
@@ -116,7 +118,7 @@ namespace RxMqtt.Shared
                             break;
                         }
 
-                        totalPacketLength = 2;//It will always be 2
+                        totalPacketLength = 2; //It will always be 2
 
                         rxBuffer = new byte[2];
                         rxBuffer[0] = typeByte;
@@ -124,6 +126,7 @@ namespace RxMqtt.Shared
                         break;
                     case MsgType.Publish:
                     case MsgType.Subscribe:
+                    case MsgType.Unsubscribe:
                         tempBuffer = ReadBytes(4);
 
                         if (tempBuffer == null || !tempBuffer.Any())
@@ -148,10 +151,7 @@ namespace RxMqtt.Shared
                     continue;
                 }
 
-                if (totalPacketLength == 0)
-                {
-                    totalPacketLength = GetMessageLength(rxBuffer);
-                }
+                if (totalPacketLength == 0) totalPacketLength = GetMessageLength(rxBuffer);
 
                 if (totalPacketLength <= rxBuffer.Length)
                 {
@@ -175,26 +175,26 @@ namespace RxMqtt.Shared
             }
         }
 
-        public void Write(MqttMessage message)
+        internal void Write(MqttMessage message)
         {
             if (message == null)
                 return;
 
             var buffer = message.GetBytes();
 
-            _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}', '{buffer.Length}' bytes - ");
+            _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}', '{buffer.Length}' bytes");
 
             WriteBytes(buffer);
         }
 
-        public void Write(byte[] buffer)
+        internal void Write(byte[] buffer)
         {
             if (buffer == null)
                 return;
 
-            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+            var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
 
-            _logger.Log(LogLevel.Info, $"Out => '{msgType}', '{buffer.Length}' bytes - ");
+            _logger.Log(LogLevel.Info, $"Out => '{msgType}', '{buffer.Length}' bytes");
 
             WriteBytes(buffer);
         }
@@ -245,7 +245,7 @@ namespace RxMqtt.Shared
 
             return decodeValue.Item1 + decodeValue.Item2 + 1;
         }
-        
+
         private void Dispose(bool disposing)
         {
             if (!disposing || _disposed) return;

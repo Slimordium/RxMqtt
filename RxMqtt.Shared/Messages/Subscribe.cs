@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using LogLevel = NLog.LogLevel;
 using System.Runtime.CompilerServices;
+using RxMqtt.Shared.Enums;
+
 [assembly: InternalsVisibleTo("RxMqtt.Broker")]
 [assembly: InternalsVisibleTo("RxMqtt.Client")]
 
@@ -149,6 +151,34 @@ namespace RxMqtt.Shared.Messages
             }
             
             return buffer;
+        }
+
+        internal static bool IsValidTopic(string topic)
+        {
+            if (Encoding.UTF8.GetByteCount(topic) > 65535)
+            {
+                return false;
+            }
+
+            var topicParts = topic.Split('/');
+            var topicPartsLength = topicParts.Length;
+
+            if (string.IsNullOrEmpty(topic) || (topicPartsLength == 1 && topic.Contains('+')))
+            {
+                return false;
+            }
+
+            if (topic.Count(p => p.Equals('+')) == topicPartsLength)
+            {
+                return false;
+            }
+
+            if (topicParts[topicPartsLength - 1].Contains('+'))
+            {
+                return false;
+            }
+
+            return topicParts.All(topicPart => topicPart.Length != 0);
         }
     }
 }

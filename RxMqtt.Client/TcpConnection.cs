@@ -8,6 +8,7 @@ using System.Reactive.Subjects;
 using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared;
+using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client
@@ -21,6 +22,7 @@ namespace RxMqtt.Client
         )
         {
             PacketSubject = Subject.Synchronize(_packetSyncSubject);
+            PublishedMessageSubject = Subject.Synchronize(_publishedMessageSyncSubject);
 
             _port = port;
             _hostName = hostName;
@@ -51,7 +53,9 @@ namespace RxMqtt.Client
                     Blocking = true,
                 };
 
-                await socket.ConnectAsync(new System.Net.IPEndPoint(_ipAddress, _port));
+                socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.DontLinger, true);
+
+                await socket.ConnectAsync(new IPEndPoint(_ipAddress, _port));
 
                 if (!socket.Connected)
                     return Status.SocketError;
@@ -64,7 +68,7 @@ namespace RxMqtt.Client
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, e);
+                _logger.Log(LogLevel.Error, $"Initialize => {e}");
 
                 _status = Status.Error;
             }
@@ -72,7 +76,7 @@ namespace RxMqtt.Client
             return _status;
         }
 
-        public void Write(MqttMessage mqttMessage)
+        internal void Write(MqttMessage mqttMessage)
         {
             if (_status != Status.Initialized || _readWriteStream == null)
                 throw new Exception("Not initialized");
@@ -89,33 +93,49 @@ namespace RxMqtt.Client
             {
                 var msgType = (MsgType)(byte)((packet[0] & 0xf0) >> (byte)MsgOffset.Type);
 
+                var packetId = 0;
+
                 switch (msgType)
                 {
                     case MsgType.Publish:
                         var msg = new Publish(packet);
 
+                        PublishedMessageSubject.OnNext(msg);
+
                         PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
                         _readWriteStream.Write(new PublishAck(msg.PacketId));
 
-                        _logger.Log(LogLevel.Info, $"In <= {msgType} PacketId: {msg.PacketId}");
+                        packetId = msg.PacketId;
+                        
                         break;
                     case MsgType.ConnectAck:
                         PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
-                        _logger.Log(LogLevel.Info, $"In <= {msgType}");
                         break;
                     case MsgType.PublishAck:
                         var pubAck = new PublishAck(packet.ToArray());
-                        _logger.Log(LogLevel.Info, $"In <= {msgType} PacketId: {pubAck.PacketId}");
+                        packetId = pubAck.PacketId;
                         PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
                         break;
+                    case MsgType.SubscribeAck:
+                        var subAck = new SubscribeAck(packet.ToArray());
+                        packetId = subAck.PacketId;
+                        PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.SubscribeAck, PacketId = subAck.PacketId, Message = subAck });
+                        break;
+                    case MsgType.UnsubscribeAck:
+                        var unsubAck = new UnsubscribeAck(packet.ToArray());
+                        packetId = unsubAck.PacketId;
+                        PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.UnsubscribeAck, PacketId = unsubAck.PacketId, Message = unsubAck });
+                        break;
                     default:
-                        _logger.Log(LogLevel.Info, $"In <= {msgType}");
+                        _logger.Log(LogLevel.Warn, $"Unhandled message type In <= {msgType}");
                         break;
                 }
+
+                _logger.Log(LogLevel.Info, $"In <= {msgType} PacketId: {packetId}");
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, e);
+                _logger.Log(LogLevel.Error, $"ProcessPackets => {e}");
             }
         }
 
@@ -125,11 +145,14 @@ namespace RxMqtt.Client
         private Status _status = Status.Error;
         private readonly int _port;
         private readonly ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
+        private readonly ISubject<Publish> _publishedMessageSyncSubject = new BehaviorSubject<Publish>(new Publish());
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private ReadWriteStream _readWriteStream;
         private readonly string _hostName;
         private IDisposable _readDisposable;
         internal ISubject<PacketEnvelope> PacketSubject { get; }
+
+        internal ISubject<Publish> PublishedMessageSubject { get; }
 
         #endregion
 
