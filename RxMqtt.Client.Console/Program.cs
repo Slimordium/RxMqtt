@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
@@ -14,6 +15,8 @@ namespace RxMqtt.Client.Console
         private static MqttClient _mqttClient;
 
         private static List<IDisposable> _disposables = new List<IDisposable>();
+
+        private static ConcurrentDictionary<string, IDisposable> _subscriptions = new ConcurrentDictionary<string, IDisposable>();
 
         static async Task Main(string[] args)
         {
@@ -65,15 +68,29 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(subscribeTopic))
                         continue;
 
-                    //_disposables.Add(_mqttClient
-                    //    .GetPublishObservable(subscribeTopic.Trim())
+                    if (_subscriptions.ContainsKey(subscribeTopic))
+                    {
+                        System.Console.WriteLine("Already subscribed ");
+                        continue;
+                    }
+
+                    var observable = await _mqttClient.GetPublishObservable(subscribeTopic.Trim());
+
+                    _subscriptions.TryAdd(subscribeTopic, observable
+                        .ObserveOn(Scheduler.Default)
+                        .Subscribe(publishedMessage =>
+                        {
+                            Handler($"To topic: '{publishedMessage.Topic}' ({subscribeTopic}) => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
+                        }));
+
+                    //_disposables.Add(observable
                     //    .ObserveOn(Scheduler.Default)
                     //    .Subscribe(publishedMessage =>
                     //    {
                     //        Handler($"To topic: '{publishedMessage.Topic}' ({subscribeTopic}) => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
                     //    }));
 
-                    await _mqttClient.Subscribe(Callback, subscribeTopic);
+                    //await _mqttClient.Subscribe(Callback, subscribeTopic);
 
                     System.Console.WriteLine("subscribed");
                 }
@@ -88,7 +105,13 @@ namespace RxMqtt.Client.Console
 
                     await _mqttClient.Unsubscribe(unsubscribeTopic);
 
-                    System.Console.WriteLine("unsubscribed");
+                    if (_subscriptions.TryRemove(unsubscribeTopic, out var subscription))
+                    {
+                        subscription?.Dispose();
+
+                        System.Console.WriteLine("unsubscribed");
+                    }
+
                 }
 
                 if (!line.StartsWith("p"))

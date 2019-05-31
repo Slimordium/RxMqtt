@@ -187,18 +187,6 @@ namespace RxMqtt.Shared
             WriteBytes(buffer);
         }
 
-        internal void Write(byte[] buffer)
-        {
-            if (buffer == null)
-                return;
-
-            var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
-
-            _logger.Log(LogLevel.Info, $"Out => '{msgType}', '{buffer.Length}' bytes");
-
-            WriteBytes(buffer);
-        }
-
         private void WriteBytes(byte[] buffer)
         {
             if (_binaryWriter == null)

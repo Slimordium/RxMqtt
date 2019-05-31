@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using LogLevel = NLog.LogLevel;
 using System.Runtime.CompilerServices;
 using RxMqtt.Shared.Enums;
 
@@ -74,10 +73,8 @@ namespace RxMqtt.Shared.Messages
 
                     topicLengthIndex += topicLength + 3;
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
-                    //Logger.Log(LogLevel.Error, e);
-                    //Logger.Log(LogLevel.Error, $"{Encoding.UTF8.GetString(buffer)}");
                     break;
                 }
             }

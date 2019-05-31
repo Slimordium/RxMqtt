@@ -20,11 +20,9 @@ namespace RxMqtt.Broker
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly ConcurrentBag<string> _subscriptions = new ConcurrentBag<string>();
-
         private readonly List<IDisposable> _disposables = new List<IDisposable>();
 
-        private readonly Dictionary<string, IDisposable> _subscriptionDisposables = new Dictionary<string, IDisposable>();
+        private readonly ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
 
         private readonly ReadWriteStream _readWriteStream;
 
@@ -168,12 +166,10 @@ namespace RxMqtt.Broker
 
             foreach (var topic in topics)
             {
-                if (_subscriptions.Contains(topic))
+                if (_subscriptionDisposables.ContainsKey(topic))
                     continue;
 
-                _subscriptions.Add(topic);
-
-                _subscriptionDisposables.Add(topic, MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
+                _subscriptionDisposables.TryAdd(topic, MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
             }
         }
 
@@ -188,9 +184,8 @@ namespace RxMqtt.Broker
 
                 subscription.Value?.Dispose();
 
-                _subscriptionDisposables.Remove(topic);
+                _subscriptionDisposables.TryRemove(topic, out var disposable);
             }
         }
     }
-
 }
