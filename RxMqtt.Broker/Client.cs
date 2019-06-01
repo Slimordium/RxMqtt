@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
@@ -14,48 +13,45 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
 {
-    internal class ClientConnection
+    internal class Client : IDisposable
     {
-        private string _clientId;
+        private readonly IDisposable _packetReadDisposable;
 
-        private ILogger _logger = LogManager.GetCurrentClassLogger();
-
-        private readonly List<IDisposable> _disposables = new List<IDisposable>();
-
-        private readonly ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
+        private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
 
         private readonly ReadWriteStream _readWriteStream;
 
         private readonly Socket _socket;
 
-        private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
+        private readonly ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
 
-        internal bool Disposed { get; set; }
-
-        private int _keepAliveSeconds;
+        private string _clientId;
 
         private Timer _heartbeatTimer;
 
-        internal ClientConnection(Socket socket)
+        private int _keepAliveSeconds;
+
+        private ILogger _logger = LogManager.GetCurrentClassLogger();
+
+        internal Client(Socket socket)
         {
-            while (!socket.Connected)
-            {
-                Task.Delay(500).Wait();
-            }
+            while (!socket.Connected) Task.Delay(250).Wait();
 
             _socket = socket;
 
             _readWriteStream = new ReadWriteStream(new NetworkStream(socket));
 
-            _disposables.Add(_readWriteStream.PacketObservable.SubscribeOn(_readEventLoopScheduler).Subscribe(ProcessPackets));
+            _packetReadDisposable = _readWriteStream.PacketObservable.SubscribeOn(_readEventLoopScheduler).Subscribe(ProcessPackets);
         }
+
+        private bool _disposed;
 
         private void HeartbeatCallback(object state)
         {
             Dispose();
         }
 
-        internal void Dispose()
+        public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
@@ -63,16 +59,31 @@ namespace RxMqtt.Broker
 
         private void Dispose(bool disposing)
         {
-            if (!disposing || Disposed) return;
+            if (!disposing || _disposed) return;
 
-            Disposed = true;
+            _disposed = true;
 
-            foreach (var disposable in _disposables)
+            DisposeAllSubscriptions();
+
+            _packetReadDisposable?.Dispose();
+
+            _readWriteStream?.Dispose();
+        }
+
+        private void DisposeAllSubscriptions()
+        {
+            foreach (var subscription in _subscriptionDisposables)
             {
-                disposable.Dispose();
-            }
+                IDisposable disposable;
 
-            _readWriteStream.Dispose();
+                while (!_subscriptionDisposables.TryRemove(subscription.Key, out disposable))
+                {
+                    Thread.Sleep(1);
+                }
+
+                disposable?.Dispose();
+                disposable = null;
+            }
         }
 
         internal bool IsConnected()
@@ -85,9 +96,9 @@ namespace RxMqtt.Broker
             if (buffer == null || !_socket.Connected)
                 return;
 
-            _readWriteStream.Write(buffer);
+            _readWriteStream?.Write(buffer);
         }
-        
+
         private void ProcessPackets(byte[] buffer)
         {
             if (buffer == null || buffer.Length <= 1)
@@ -95,7 +106,7 @@ namespace RxMqtt.Broker
 
             _heartbeatTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
-            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+            var msgType = (MsgType) (byte) ((buffer[0] & 0xf0) >> (byte) MsgOffset.Type);
 
             try
             {
@@ -149,7 +160,7 @@ namespace RxMqtt.Broker
                     case MsgType.Disconnect:
                         break;
                     default:
-                        _logger.Log(LogLevel.Warn, $"Ignoring message");
+                        _logger.Log(LogLevel.Warn, "Ignoring message");
                         break;
                 }
             }
@@ -169,7 +180,10 @@ namespace RxMqtt.Broker
                 if (_subscriptionDisposables.ContainsKey(topic))
                     continue;
 
-                _subscriptionDisposables.TryAdd(topic, MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
+                while (!_subscriptionDisposables.TryAdd(topic, MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext)))
+                {
+                    Thread.Sleep(1);
+                }
             }
         }
 
@@ -180,11 +194,14 @@ namespace RxMqtt.Broker
 
             foreach (var topic in topics)
             {
-                var subscription = _subscriptionDisposables.FirstOrDefault(s => s.Key.Equals(topic));
+                IDisposable disposable;
 
-                subscription.Value?.Dispose();
+                while (!_subscriptionDisposables.TryRemove(topic, out disposable))
+                {
+                    Thread.Sleep(1);
+                }
 
-                _subscriptionDisposables.TryRemove(topic, out var disposable);
+                disposable?.Dispose();
             }
         }
     }

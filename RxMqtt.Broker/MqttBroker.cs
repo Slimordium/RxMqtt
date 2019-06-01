@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -8,17 +8,16 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using NLog;
-using RxMqtt.Shared;
 using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
 {
-    public class MqttBroker
+    public class MqttBroker : IDisposable
     {
         private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private static readonly Dictionary<Guid, ClientConnection> _clients = new Dictionary<Guid, ClientConnection>();
+        private static readonly ConcurrentDictionary<Guid, Client> _clients = new ConcurrentDictionary<Guid, Client>();
 
         internal static ISubject<Publish> PublishSyncSubject;
         private readonly AutoResetEvent _acceptConnectionResetEvent = new AutoResetEvent(false);
@@ -31,7 +30,7 @@ namespace RxMqtt.Broker
 
         private CancellationToken _cancellationToken;
 
-        private IDisposable _disposable;
+        private IDisposable _disposeAtIntervalDisposable;
 
         private IPEndPoint _ipEndPoint;
 
@@ -42,9 +41,6 @@ namespace RxMqtt.Broker
             _logger.Log(LogLevel.Info, "Binding to all local addresses, port 1883");
         }
 
-        /// <summary>
-        ///     Recursively handle read/write to all clients
-        /// </summary>
         public MqttBroker(string ipAddress)
         {
             if (!IPAddress.TryParse(ipAddress, out _ipAddress))
@@ -77,7 +73,7 @@ namespace RxMqtt.Broker
                 return;
             }
 
-            _disposable = Observable
+            _disposeAtIntervalDisposable = Observable
                 .Interval(TimeSpan.FromSeconds(3))
                 .ObserveOn(Scheduler.Default) //Was subscribe on NewThreadScheduler
                 .Subscribe(_ => DisposeDisconnectedClients());
@@ -109,6 +105,8 @@ namespace RxMqtt.Broker
                     _logger.Log(LogLevel.Error, e);
                     throw;
                 }
+
+            Dispose();
         }
 
         private void AcceptConnectionCallback(IAsyncResult asyncResult)
@@ -121,7 +119,7 @@ namespace RxMqtt.Broker
             socket.UseOnlyOverlappedIO = true;
             socket.Blocking = true;
 
-            _clients.Add(Guid.NewGuid(), new ClientConnection(socket));
+            _clients.TryAdd(Guid.NewGuid(), new Client(socket));
 
             _logger.Log(LogLevel.Trace, "Client task created");
 
@@ -130,24 +128,39 @@ namespace RxMqtt.Broker
 
         private static void DisposeDisconnectedClients()
         {
-            var toRemove = new List<Guid>();
+            foreach (var c in _clients.Where(c => !c.Value.IsConnected()))
+            {
+                if (!_clients.TryRemove(c.Key, out var client))
+                    Thread.Sleep(1);
 
-            foreach (var client in _clients.Where(c => !c.Value.IsConnected()))
-                try
-                {
-                    toRemove.Add(client.Key);
+                client?.Dispose();
+            }
+        }
 
-                    client.Value.Dispose();
-                }
-                catch (Exception e)
-                {
-                    _logger.Log(LogLevel.Error, $"Error disposing client => '{e.Message}'");
-                }
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
 
-            foreach (var guid in toRemove) _clients.Remove(guid);
+        private static bool _disposed;
 
-            if (toRemove.Count > 0)
-                _logger.Log(LogLevel.Debug, $"Disposed '{toRemove.Count}' clients");
+        private void Dispose(bool disposing)
+        {
+            if (!disposing || _disposed) return;
+
+            _disposed = true;
+
+            foreach (var c in _clients)
+            {
+                if (!_clients.TryRemove(c.Key, out var client))
+                    Thread.Sleep(1);
+
+                client?.Dispose();
+            }
+
+            _acceptConnectionResetEvent?.Dispose();
+            _disposeAtIntervalDisposable?.Dispose();
         }
     }
 }
