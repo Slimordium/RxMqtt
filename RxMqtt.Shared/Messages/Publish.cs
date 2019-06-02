@@ -122,13 +122,7 @@ namespace RxMqtt.Shared.Messages
 
             var topicParts = Topic.Split('/');
             var topicFilterParts = topicFilter.Split('/');
-
             var loopCount = topicParts.Length;
-
-            //if (topicFilterParts.Length != topicParts.Length)
-            //{
-            //    return false;
-            //}
 
             for (var i = 0; i < loopCount; i++)
             {
@@ -137,7 +131,7 @@ namespace RxMqtt.Shared.Messages
                     return true;
                 }
 
-                if (!topicParts[i].Equals(topicFilterParts[i]) &&
+                if (topicFilterParts.Length > i && !topicParts[i].Equals(topicFilterParts[i]) &&
                     !topicFilterParts[i].Equals("#") &&
                     !topicFilterParts[i].Equals("+"))
                 {

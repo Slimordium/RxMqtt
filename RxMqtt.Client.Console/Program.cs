@@ -77,7 +77,7 @@ namespace RxMqtt.Client.Console
                     var observable = await _mqttClient.GetPublishObservable(subscribeTopic.Trim());
 
                     _subscriptions.TryAdd(subscribeTopic, observable
-                        .ObserveOn(Scheduler.Default)
+                        //.ObserveOn(Scheduler.Default)
                         .Subscribe(publishedMessage =>
                         {
                             Handler($"To topic: '{publishedMessage.Topic}' ({subscribeTopic}) => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
@@ -131,7 +131,13 @@ namespace RxMqtt.Client.Console
                 if (string.IsNullOrEmpty(count))
                     count = "1";
 
-                await Publish(msg, topic, count); 
+                System.Console.WriteLine("Publish interval (100ms):");
+                var delay = System.Console.ReadLine();
+
+                if (string.IsNullOrEmpty(delay))
+                    delay = "100";
+
+                await Publish(msg, topic, count, delay); 
             }
         }
 
@@ -147,7 +153,7 @@ namespace RxMqtt.Client.Console
         /// <param name="topic"></param>
         /// <param name="count"></param>
         /// <returns></returns>
-        private static async Task Publish(string msg, string topic, string count)
+        private static async Task Publish(string msg, string topic, string count, string delay)
         {
             int parsedCount;
 
@@ -156,11 +162,23 @@ namespace RxMqtt.Client.Console
                 parsedCount = 1;
             }
 
+            int parsedDelay;
+
+            if (!int.TryParse(delay, out parsedDelay))
+            {
+                parsedDelay = 100;
+            }
+
             for (var i = 0; i < parsedCount; i++)
             {
                 try
                 {
                     var r = await _mqttClient.PublishAsync(msg, topic);
+
+                    if (parsedDelay > 0)
+                    {
+                        await Task.Delay(parsedDelay);
+                    }
                 }
                 catch (Exception e)
                 {
