@@ -118,9 +118,6 @@ namespace RxMqtt.Broker
             var listener = (Socket) asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
-            socket.UseOnlyOverlappedIO = true;
-            socket.Blocking = true;
-
             _clients.Add(Guid.NewGuid(), new ClientConnection(socket));
 
             _logger.Log(LogLevel.Trace, "Client task created");

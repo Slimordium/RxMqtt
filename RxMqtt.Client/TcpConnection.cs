@@ -46,12 +46,8 @@ namespace RxMqtt.Client
                         return _status;
                     }
                 }
-               
-                var socket = new Socket(_ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp)
-                {
-                    UseOnlyOverlappedIO = true,
-                    Blocking = true,
-                };
+
+                var socket = new Socket(_ipAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
                 socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.DontLinger, true);
 

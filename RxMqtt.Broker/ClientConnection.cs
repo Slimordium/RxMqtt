@@ -20,9 +20,9 @@ namespace RxMqtt.Broker
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly List<IDisposable> _disposables = new List<IDisposable>();
+        private readonly IDisposable _disposable;
 
-        private readonly ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
+        private ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
 
         private readonly ReadWriteStream _readWriteStream;
 
@@ -40,14 +40,14 @@ namespace RxMqtt.Broker
         {
             while (!socket.Connected)
             {
-                Task.Delay(500).Wait();
+                Task.Delay(250).Wait();
             }
 
             _socket = socket;
 
             _readWriteStream = new ReadWriteStream(new NetworkStream(socket));
 
-            _disposables.Add(_readWriteStream.PacketObservable.SubscribeOn(_readEventLoopScheduler).Subscribe(ProcessPackets));
+            _disposable = _readWriteStream.PacketObservable.SubscribeOn(_readEventLoopScheduler).Subscribe(ProcessPackets);
         }
 
         private void HeartbeatCallback(object state)
@@ -67,11 +67,12 @@ namespace RxMqtt.Broker
 
             Disposed = true;
 
-            foreach (var disposable in _disposables)
+            foreach (var subscription in _subscriptionDisposables)
             {
-                disposable.Dispose();
+                subscription.Value.Dispose();
             }
 
+            _subscriptionDisposables = null;
             _readWriteStream.Dispose();
         }
 
@@ -180,11 +181,8 @@ namespace RxMqtt.Broker
 
             foreach (var topic in topics)
             {
-                var subscription = _subscriptionDisposables.FirstOrDefault(s => s.Key.Equals(topic));
-
-                subscription.Value?.Dispose();
-
                 _subscriptionDisposables.TryRemove(topic, out var disposable);
+                disposable?.Dispose();
             }
         }
     }

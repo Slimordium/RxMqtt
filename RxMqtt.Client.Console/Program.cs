@@ -6,6 +6,7 @@ using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client.Console
 {
@@ -13,10 +14,6 @@ namespace RxMqtt.Client.Console
     class Program
     {
         private static MqttClient _mqttClient;
-
-        private static List<IDisposable> _disposables = new List<IDisposable>();
-
-        private static ConcurrentDictionary<string, IDisposable> _subscriptions = new ConcurrentDictionary<string, IDisposable>();
 
         static async Task Main(string[] args)
         {
@@ -68,29 +65,7 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(subscribeTopic))
                         continue;
 
-                    if (_subscriptions.ContainsKey(subscribeTopic))
-                    {
-                        System.Console.WriteLine("Already subscribed ");
-                        continue;
-                    }
-
-                    var observable = await _mqttClient.GetPublishObservable(subscribeTopic.Trim());
-
-                    _subscriptions.TryAdd(subscribeTopic, observable
-                        .ObserveOn(Scheduler.Default)
-                        .Subscribe(publishedMessage =>
-                        {
-                            Handler($"To topic: '{publishedMessage.Topic}' ({subscribeTopic}) => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
-                        }));
-
-                    //_disposables.Add(observable
-                    //    .ObserveOn(Scheduler.Default)
-                    //    .Subscribe(publishedMessage =>
-                    //    {
-                    //        Handler($"To topic: '{publishedMessage.Topic}' ({subscribeTopic}) => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
-                    //    }));
-
-                    //await _mqttClient.Subscribe(Callback, subscribeTopic);
+                    await _mqttClient.Subscribe(Callback, subscribeTopic);
 
                     System.Console.WriteLine("subscribed");
                 }
@@ -104,14 +79,6 @@ namespace RxMqtt.Client.Console
                         continue;
 
                     await _mqttClient.Unsubscribe(unsubscribeTopic);
-
-                    if (_subscriptions.TryRemove(unsubscribeTopic, out var subscription))
-                    {
-                        subscription?.Dispose();
-
-                        System.Console.WriteLine("unsubscribed");
-                    }
-
                 }
 
                 if (!line.StartsWith("p"))
@@ -131,13 +98,20 @@ namespace RxMqtt.Client.Console
                 if (string.IsNullOrEmpty(count))
                     count = "1";
 
-                await Publish(msg, topic, count); 
+                System.Console.WriteLine("Publish interval (100ms):");
+                var delay = System.Console.ReadLine();
+
+                if (string.IsNullOrEmpty(delay))
+                    delay = "100";
+
+                await Publish(msg, topic, count, delay);
+
             }
         }
 
-        private static void Callback(string obj)
+        private static void Callback(Publish publishedMessage)
         {
-            System.Console.WriteLine(obj);
+            System.Console.WriteLine($"To topic: '{publishedMessage.Topic}' => '{Encoding.UTF8.GetString(publishedMessage.Message)}'");
         }
 
         /// <summary>
@@ -147,7 +121,7 @@ namespace RxMqtt.Client.Console
         /// <param name="topic"></param>
         /// <param name="count"></param>
         /// <returns></returns>
-        private static async Task Publish(string msg, string topic, string count)
+        private static async Task Publish(string msg, string topic, string count, string delay)
         {
             int parsedCount;
 
@@ -156,11 +130,23 @@ namespace RxMqtt.Client.Console
                 parsedCount = 1;
             }
 
+            int parsedDelay;
+
+            if (!int.TryParse(delay, out parsedDelay))
+            {
+                parsedDelay = 100;
+            }
+
             for (var i = 0; i < parsedCount; i++)
             {
                 try
                 {
                     var r = await _mqttClient.PublishAsync(msg, topic);
+
+                    if (parsedDelay > 0)
+                    {
+                        await Task.Delay(parsedDelay);
+                    }
                 }
                 catch (Exception e)
                 {
