@@ -65,7 +65,10 @@ namespace RxMqtt.Client.Console
                     if (string.IsNullOrEmpty(subscribeTopic))
                         continue;
 
-                    await _mqttClient.Subscribe(Callback, subscribeTopic);
+                    //await _mqttClient.Subscribe(Callback, subscribeTopic);
+
+                    var o = await _mqttClient.GetSubscriptionObservable(subscribeTopic);
+                    o.Subscribe(Callback);
 
                     System.Console.WriteLine("subscribed");
                 }

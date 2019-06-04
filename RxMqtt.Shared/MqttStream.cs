@@ -12,22 +12,19 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Shared
 {
-    internal class ReadWriteStream
+    internal class MqttStream : NetworkStream
     {
         private readonly CancellationTokenSource _cancellationTokenSourceSource = new CancellationTokenSource();
-        private readonly NetworkStream _networkStream;
         private BinaryReader _binaryReader;
         private BinaryWriter _binaryWriter;
         private bool _disposed;
         private ILogger _logger;
 
-        internal ReadWriteStream(NetworkStream networkStream)
+        internal MqttStream(Socket socket) : base(socket, true)
         {
             _logger = LogManager.GetLogger($"ReadWriteStream-{DateTime.Now.Minute}.{DateTime.Now.Millisecond}");
 
-            _networkStream = networkStream;
-
-            PacketObservable = PacketEnumerable().ToObservable();
+            PacketObservable = PacketEnumerable().ToObservable(System.Reactive.Concurrency.Scheduler.Default);
         }
 
         internal IObservable<byte[]> PacketObservable { get; private set; }
@@ -151,7 +148,8 @@ namespace RxMqtt.Shared
                     continue;
                 }
 
-                if (totalPacketLength == 0) totalPacketLength = GetMessageLength(rxBuffer);
+                if (totalPacketLength == 0)
+                    totalPacketLength = GetMessageLength(rxBuffer);
 
                 if (totalPacketLength <= rxBuffer.Length)
                 {
@@ -190,7 +188,7 @@ namespace RxMqtt.Shared
         private void WriteBytes(byte[] buffer)
         {
             if (_binaryWriter == null)
-                _binaryWriter = new BinaryWriter(_networkStream, Encoding.UTF8, true);
+                _binaryWriter = new BinaryWriter(this, Encoding.UTF8, true);
 
             try
             {
@@ -208,7 +206,7 @@ namespace RxMqtt.Shared
         private byte[] ReadBytes(int bytesToRead)
         {
             if (_binaryReader == null)
-                _binaryReader = new BinaryReader(_networkStream, Encoding.UTF8, true);
+                _binaryReader = new BinaryReader(this, Encoding.UTF8, true);
 
             byte[] buffer = null;
 
@@ -234,7 +232,7 @@ namespace RxMqtt.Shared
             return decodeValue.Item1 + decodeValue.Item2 + 1;
         }
 
-        private void Dispose(bool disposing)
+        private new void Dispose(bool disposing)
         {
             if (!disposing || _disposed) return;
 
@@ -243,12 +241,12 @@ namespace RxMqtt.Shared
             if (!_cancellationTokenSourceSource.IsCancellationRequested)
                 _cancellationTokenSourceSource.Cancel();
 
-            _networkStream?.Dispose();
+            base.Dispose();
 
             PacketObservable = null;
         }
 
-        public void Dispose()
+        public new void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);

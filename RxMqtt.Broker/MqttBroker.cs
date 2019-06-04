@@ -18,7 +18,7 @@ namespace RxMqtt.Broker
     {
         private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private static readonly Dictionary<Guid, ClientConnection> _clients = new Dictionary<Guid, ClientConnection>();
+        private static readonly Dictionary<Guid, ConnectedClient> _clients = new Dictionary<Guid, ConnectedClient>();
 
         internal static ISubject<Publish> PublishSyncSubject;
         private readonly AutoResetEvent _acceptConnectionResetEvent = new AutoResetEvent(false);
@@ -118,7 +118,7 @@ namespace RxMqtt.Broker
             var listener = (Socket) asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
-            _clients.Add(Guid.NewGuid(), new ClientConnection(socket));
+            _clients.Add(Guid.NewGuid(), new ConnectedClient(socket));
 
             _logger.Log(LogLevel.Trace, "Client task created");
 

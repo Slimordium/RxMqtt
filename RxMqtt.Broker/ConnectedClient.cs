@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
@@ -14,7 +13,10 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Broker
 {
-    internal class ClientConnection
+    /// <summary>
+    /// 
+    /// </summary>
+    internal class ConnectedClient
     {
         private string _clientId;
 
@@ -24,9 +26,7 @@ namespace RxMqtt.Broker
 
         private ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
 
-        private readonly ReadWriteStream _readWriteStream;
-
-        private readonly Socket _socket;
+        private MqttStream _mqttStream;
 
         private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
 
@@ -36,7 +36,9 @@ namespace RxMqtt.Broker
 
         private Timer _heartbeatTimer;
 
-        internal ClientConnection(Socket socket)
+        private Socket _socket;
+
+        internal ConnectedClient(Socket socket)
         {
             while (!socket.Connected)
             {
@@ -44,12 +46,15 @@ namespace RxMqtt.Broker
             }
 
             _socket = socket;
+            _mqttStream = new MqttStream(_socket);
 
-            _readWriteStream = new ReadWriteStream(new NetworkStream(socket));
-
-            _disposable = _readWriteStream.PacketObservable.SubscribeOn(_readEventLoopScheduler).Subscribe(ProcessPackets);
+            _disposable = _mqttStream.PacketObservable.Subscribe(ParsePacket);
         }
 
+        /// <summary>
+        /// This is only invoked if the client does not send a Ping
+        /// </summary>
+        /// <param name="state"></param>
         private void HeartbeatCallback(object state)
         {
             Dispose();
@@ -73,7 +78,8 @@ namespace RxMqtt.Broker
             }
 
             _subscriptionDisposables = null;
-            _readWriteStream.Dispose();
+            _mqttStream.Dispose();
+            _mqttStream = null;
         }
 
         internal bool IsConnected()
@@ -86,31 +92,31 @@ namespace RxMqtt.Broker
             if (buffer == null || !_socket.Connected)
                 return;
 
-            _readWriteStream.Write(buffer);
+            _mqttStream?.Write(buffer);
         }
         
-        private void ProcessPackets(byte[] buffer)
+        private void ParsePacket(byte[] packet)
         {
-            if (buffer == null || buffer.Length <= 1)
+            if (packet == null || packet.Length <= 1)
                 return;
 
             _heartbeatTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
-            var msgType = (MsgType)(byte)((buffer[0] & 0xf0) >> (byte)MsgOffset.Type);
+            var msgType = (MsgType)(byte)((packet[0] & 0xf0) >> (byte)MsgOffset.Type);
 
             try
             {
                 switch (msgType)
                 {
                     case MsgType.Publish:
-                        var publishMsg = new Publish(buffer);
+                        var publishMsg = new Publish(packet);
 
-                        _readWriteStream.Write(new PublishAck(publishMsg.PacketId));
+                        _mqttStream.Write(new PublishAck(publishMsg.PacketId));
 
                         MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscribed to the topic this was sent to
                         break;
                     case MsgType.Connect:
-                        var connectMsg = new Connect(buffer);
+                        var connectMsg = new Connect(packet);
 
                         _keepAliveSeconds = connectMsg.KeepAlivePeriod;
 
@@ -124,25 +130,25 @@ namespace RxMqtt.Broker
 
                         _logger = LogManager.GetLogger(_clientId);
 
-                        _readWriteStream.SetLogger(_logger);
+                        _mqttStream.SetLogger(_logger);
 
-                        _readWriteStream.Write(new ConnectAck());
+                        _mqttStream.Write(new ConnectAck());
                         break;
                     case MsgType.PingRequest:
 
-                        _readWriteStream.Write(new PingResponse());
+                        _mqttStream.Write(new PingResponse());
                         break;
                     case MsgType.Subscribe:
-                        var subscribeMsg = new Subscribe(buffer);
+                        var subscribeMsg = new Subscribe(packet);
 
-                        _readWriteStream.Write(new SubscribeAck(subscribeMsg.PacketId));
+                        _mqttStream.Write(new SubscribeAck(subscribeMsg.PacketId));
 
                         Subscribe(subscribeMsg.Topics);
                         break;
                     case MsgType.Unsubscribe:
-                        var unsubscribeMsg = new Unsubscribe(buffer);
+                        var unsubscribeMsg = new Unsubscribe(packet);
 
-                        _readWriteStream.Write(new UnsubscribeAck(unsubscribeMsg.PacketId));
+                        _mqttStream.Write(new UnsubscribeAck(unsubscribeMsg.PacketId));
 
                         Unsubscribe(unsubscribeMsg.Topics);
                         break;

@@ -2,7 +2,6 @@
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading.Tasks;
@@ -13,17 +12,14 @@ using RxMqtt.Shared.Messages;
 
 namespace RxMqtt.Client
 {
-    internal class TcpConnection : IDisposable
+    internal class MqttStreamWrapper : IDisposable
     {
-        internal TcpConnection
+        internal MqttStreamWrapper
         (
             string hostName,
             int port
         )
         {
-            PacketSubject = Subject.Synchronize(_packetSyncSubject);
-            PublishedMessageSubject = Subject.Synchronize(_publishedMessageSyncSubject);
-
             _port = port;
             _hostName = hostName;
         }
@@ -58,9 +54,9 @@ namespace RxMqtt.Client
 
                 _status = Status.Initialized;
               
-                _readWriteStream = new ReadWriteStream(new NetworkStream(socket, true));
+                _readWriteStream = new MqttStream(socket);
 
-                _readDisposable = _readWriteStream.PacketObservable.SubscribeOn(NewThreadScheduler.Default).Subscribe(ProcessPackets);
+                _readDisposable = _readWriteStream.PacketObservable.Subscribe(ParsePacket);
             }
             catch (Exception e)
             {
@@ -80,7 +76,7 @@ namespace RxMqtt.Client
             _readWriteStream.Write(mqttMessage);
         }
 
-        private void ProcessPackets(byte[] packet) 
+        private void ParsePacket(byte[] packet) 
         {
             if (packet == null)
                 return;
@@ -95,8 +91,6 @@ namespace RxMqtt.Client
                 {
                     case MsgType.Publish:
                         var msg = new Publish(packet);
-
-                        PublishedMessageSubject.OnNext(msg);
 
                         PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
                         _readWriteStream.Write(new PublishAck(msg.PacketId));
@@ -122,6 +116,8 @@ namespace RxMqtt.Client
                         packetId = unsubAck.PacketId;
                         PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.UnsubscribeAck, PacketId = unsubAck.PacketId, Message = unsubAck });
                         break;
+                    case MsgType.PingResponse:
+                        break;
                     default:
                         _logger.Log(LogLevel.Warn, $"Unhandled message type In <= {msgType}");
                         break;
@@ -140,15 +136,11 @@ namespace RxMqtt.Client
         private IPAddress _ipAddress;
         private Status _status = Status.Error;
         private readonly int _port;
-        private readonly ISubject<PacketEnvelope> _packetSyncSubject = new BehaviorSubject<PacketEnvelope>(null);
-        private readonly ISubject<Publish> _publishedMessageSyncSubject = new BehaviorSubject<Publish>(new Publish());
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
-        private ReadWriteStream _readWriteStream;
+        private MqttStream _readWriteStream;
         private readonly string _hostName;
         private IDisposable _readDisposable;
-        internal ISubject<PacketEnvelope> PacketSubject { get; }
-
-        internal ISubject<Publish> PublishedMessageSubject { get; }
+        internal ISubject<PacketEnvelope> PacketSubject { get; } = new BehaviorSubject<PacketEnvelope>(new PacketEnvelope());
 
         #endregion
 

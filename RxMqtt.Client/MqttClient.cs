@@ -33,7 +33,7 @@ namespace RxMqtt.Client
 
             _logger.Log(LogLevel.Trace, $"MQTT Client {connectionId}, {brokerHostname}");
 
-            _connection = new TcpConnection(
+            _connection = new MqttStreamWrapper(
                 brokerHostname,
                 port);
         }
@@ -42,7 +42,7 @@ namespace RxMqtt.Client
 
         private readonly ILogger _logger = LogManager.GetCurrentClassLogger();
         private readonly string _connectionId;
-        private readonly TcpConnection _connection;
+        private readonly MqttStreamWrapper _connection;
         private ushort _keepAliveInSeconds;
         private Status _status = Status.Error;
         private readonly Dictionary<string, IDisposable> _disposables = new Dictionary<string, IDisposable>();
@@ -131,6 +131,25 @@ namespace RxMqtt.Client
             return PublishAsync(Encoding.UTF8.GetBytes(message), topic, TimeSpan.FromSeconds(3));
         }
 
+        public async Task<IObservable<Publish>> GetSubscriptionObservable(string topic)
+        {
+            var publishObservable = _connection.PacketSubject
+                .Where(message => message.MsgType == MsgType.Publish && ((Publish)message.Message).IsTopicMatch(topic))
+                .Select(publishedMessage => ((Publish)publishedMessage.Message));
+
+            if (!_disposables.ContainsKey(topic))
+                _disposables.Add(topic, null);
+
+            var msg = new Subscribe(_disposables.Keys.ToArray());
+
+            _connection.Write(msg);
+
+            if (!await WaitForAck(MsgType.SubscribeAck, msg.PacketId))
+                throw new TimeoutException();
+
+            return publishObservable;
+        }
+
         /// <summary>
         /// Topic.StartsWith(topic)
         /// </summary>
@@ -150,14 +169,14 @@ namespace RxMqtt.Client
             }
 
             _disposables.Add(topic,
-                _connection.PublishedMessageSubject
-                .Where(message => message.IsTopicMatch(topic))
+                _connection.PacketSubject
+                .Where(envelope => envelope.MsgType == MsgType.Publish && ((Publish)envelope.Message).IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default)
-                .Subscribe(publishedMessage =>
+                .Subscribe(envelope =>
                     {
                         try
                         {
-                            callback.Invoke(publishedMessage);
+                            callback.Invoke(((Publish)envelope.Message));
                         }
                         catch (Exception e)
                         {

@@ -1,8 +1,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using NLog;
 using System.Runtime.CompilerServices;
 using RxMqtt.Shared.Enums;
 
@@ -19,35 +17,23 @@ namespace RxMqtt.Shared.Messages
     /// </summary>
     public abstract class MqttMessage
     {
-        //static MqttMessage()
-        //{
-        //    Logger = LogManager.GetCurrentClassLogger();
-        //}
-
-        //internal static ILogger Logger { get; }
-
         public QosLevel QosLevel { get; set; } = QosLevel.AtLeastOnce;
 
         internal bool IsDuplicate { get; set; } = false;
 
-        internal ushort PacketId { get; set; }// = GetNextPacketId();
+        internal ushort PacketId { get; set; }
 
         internal MsgType MsgType { get; set; } = MsgType.Publish;
 
         private static volatile ushort _messageIdCounter = 1;
 
-        //private static readonly object _idLock = new object();
-
         internal static ushort GetNextPacketId()
         {
-            //lock (_idLock)
-            //{
-                if (_messageIdCounter >= ushort.MaxValue - 1)
-                    _messageIdCounter = 1;
-                else
-                    _messageIdCounter++;
-                return _messageIdCounter;
-            //}
+            if (_messageIdCounter >= ushort.MaxValue - 1)
+                _messageIdCounter = 1;
+            else
+                _messageIdCounter++;
+            return _messageIdCounter;
         }
 
         protected MqttMessage()
