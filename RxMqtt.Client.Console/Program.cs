@@ -67,7 +67,7 @@ namespace RxMqtt.Client.Console
 
                     //await _mqttClient.Subscribe(Callback, subscribeTopic);
 
-                    var o = await _mqttClient.GetSubscriptionObservable(subscribeTopic);
+                    var o = await _mqttClient.WhenPublishedOn(subscribeTopic);
                     o.Subscribe(Callback);
 
                     System.Console.WriteLine("subscribed");

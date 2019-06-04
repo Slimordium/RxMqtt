@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
@@ -31,7 +31,7 @@ namespace RxMqtt.Client
             _connectionId = connectionId;
             _keepAliveInSeconds = (ushort) keepAliveInSeconds;
 
-            _logger.Log(LogLevel.Trace, $"MQTT Client {connectionId}, {brokerHostname}");
+            _logger.Log(LogLevel.Trace, $"MQTT Client '{connectionId}' => '{brokerHostname}'");
 
             _connection = new MqttStreamWrapper(
                 brokerHostname,
@@ -45,7 +45,8 @@ namespace RxMqtt.Client
         private readonly MqttStreamWrapper _connection;
         private ushort _keepAliveInSeconds;
         private Status _status = Status.Error;
-        private readonly Dictionary<string, IDisposable> _disposables = new Dictionary<string, IDisposable>();
+        private readonly ConcurrentDictionary<string, IDisposable> _subscriptions = new ConcurrentDictionary<string, IDisposable>();
+        private bool _disposed;
         private Timer _keepAliveTimer;
 
         #endregion
@@ -84,70 +85,58 @@ namespace RxMqtt.Client
             _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
         }
 
-        public Task<PublishAck> PublishAsync(string message, string topic, TimeSpan timeout, QosLevel qosLevel = QosLevel.AtLeastOnce)
+        public Task<bool> PublishAsync(string message, string topic)
         {
-            return PublishAsync(Encoding.UTF8.GetBytes(message), topic, timeout, qosLevel);
+            return PublishAsync(Encoding.UTF8.GetBytes(message), topic);
         }
 
-        public async Task<PublishAck> PublishAsync(byte[] buffer, string topic, TimeSpan timeout, QosLevel qosLevel = QosLevel.AtLeastOnce)
+        public async Task<bool> PublishAsync(byte[] buffer, string topic)
         {
+            if (topic.Contains("#") || topic.Contains("+"))
+            {
+                throw new ArgumentException($"'{topic}' is not a valid topic");
+            }
+
             var messageToPublish = new Publish
             {
                 Topic = topic,
                 Message = buffer
             };
 
-            _logger.Log(LogLevel.Info, $"Publishing bytes to => '{topic}'");
+            _logger.Log(LogLevel.Info, $"Publishing to => '{topic}'");
 
             _connection.Write(messageToPublish);
 
-            var packetId = 0;
-
-            if (qosLevel == QosLevel.AtMostOnce)
-                return new PublishAck((ushort)packetId);
-
-            var packetEnvelope = await _connection.PacketSubject
-                .Timeout(timeout)
-                .SkipWhile(envelope => envelope?.MsgType != MsgType.PublishAck)
-                .SkipWhile(envelope => envelope.PacketId != messageToPublish.PacketId)
-                .ObserveOn(Scheduler.Default)
-                .Take(1);
-
-            packetId = packetEnvelope.PacketId;
-
-            return new PublishAck((ushort)packetId);
+            return await WaitForAck(MsgType.PublishAck, messageToPublish.PacketId);
         }
 
         /// <summary>
-        /// Message will be split into packets set by BufferLength
+        /// Returns observable that emmits messages published on specified topic
         /// </summary>
-        /// <param name="message"></param>
         /// <param name="topic"></param>
-        /// <param name="qos"></param>
-        /// <param name="qosLevel"></param>
         /// <returns></returns>
-        public Task<PublishAck> PublishAsync(string message, string topic, QosLevel qosLevel = QosLevel.AtLeastOnce)
+        public async Task<IObservable<Publish>> WhenPublishedOn(string topic)
         {
-            return PublishAsync(Encoding.UTF8.GetBytes(message), topic, TimeSpan.FromSeconds(3));
-        }
+            if (!Shared.Messages.Subscribe.IsValidTopic(topic))
+            {
+                throw new ArgumentException($"'{topic}' is not a valid topic");
+            }
 
-        public async Task<IObservable<Publish>> GetSubscriptionObservable(string topic)
-        {
             var publishObservable = _connection.PacketSubject
                 .Where(message => message.MsgType == MsgType.Publish && ((Publish)message.Message).IsTopicMatch(topic))
-                .Select(publishedMessage => ((Publish)publishedMessage.Message));
+                .ObserveOn(Scheduler.Default)
+                .Select(publishedMessage => (Publish)publishedMessage.Message);
 
-            if (!_disposables.ContainsKey(topic))
-                _disposables.Add(topic, null);
+            _subscriptions.TryAdd(topic, null);
 
-            var msg = new Subscribe(_disposables.Keys.ToArray());
+            var msg = new Subscribe(_subscriptions.Keys.ToArray());
 
             _connection.Write(msg);
 
             if (!await WaitForAck(MsgType.SubscribeAck, msg.PacketId))
                 throw new TimeoutException();
 
-            return publishObservable;
+            return await Task.FromResult(publishObservable);
         }
 
         /// <summary>
@@ -157,7 +146,7 @@ namespace RxMqtt.Client
         /// <param name="topic"></param>
         public async Task<bool> Subscribe(Action<Publish> callback, string topic)
         {
-            if (_disposables.ContainsKey(topic))
+            if (_subscriptions.ContainsKey(topic))
             {
                 _logger.Log(LogLevel.Warn, $"Already subscribed to '{topic}'");
                 return await Task.FromResult(false);
@@ -165,10 +154,10 @@ namespace RxMqtt.Client
 
             if (!Shared.Messages.Subscribe.IsValidTopic(topic))
             {
-                return await Task.FromResult(false);
+                throw new ArgumentException($"'{topic}' is not a valid topic");
             }
 
-            _disposables.Add(topic,
+            _subscriptions.TryAdd(topic,
                 _connection.PacketSubject
                 .Where(envelope => envelope.MsgType == MsgType.Publish && ((Publish)envelope.Message).IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default)
@@ -176,7 +165,7 @@ namespace RxMqtt.Client
                     {
                         try
                         {
-                            callback.Invoke(((Publish)envelope.Message));
+                            callback.Invoke((Publish)envelope.Message);
                         }
                         catch (Exception e)
                         {
@@ -184,7 +173,7 @@ namespace RxMqtt.Client
                         }
                     }));
 
-            var subscribeMessage = new Subscribe(_disposables.Keys.ToArray());
+            var subscribeMessage = new Subscribe(_subscriptions.Keys.ToArray());
 
             _connection.Write(subscribeMessage);
 
@@ -196,11 +185,11 @@ namespace RxMqtt.Client
             try
             {
                 var subscribeAck = await _connection.PacketSubject
-                    .Timeout(TimeSpan.FromSeconds(5))
-                    .ObserveOn(Scheduler.Default)
+                    .Timeout(TimeSpan.FromSeconds(3))
                     .Where(packetEnvelope =>
                         packetEnvelope.MsgType == msgType &&
                         packetEnvelope.PacketId == packetId)
+                    .ObserveOn(Scheduler.Default)
                     .Take(1);
             }
             catch (TimeoutException)
@@ -215,14 +204,14 @@ namespace RxMqtt.Client
 
         public async Task Unsubscribe(string topic)
         {
-            _logger.Log(LogLevel.Trace, $"Unsubscribe from {topic}");
+            _logger.Log(LogLevel.Trace, $"Unsubscribe from '{topic}'");
 
-            if (!_disposables.ContainsKey(topic))
+            if (!_subscriptions.ContainsKey(topic))
                 return;
 
-            _disposables[topic]?.Dispose();
+            _subscriptions.TryRemove(topic, out var dispossable);
 
-            _disposables.Remove(topic);
+            dispossable?.Dispose();
 
             var unsubscribeMessage = new Unsubscribe(new[] {topic});
 
@@ -232,8 +221,6 @@ namespace RxMqtt.Client
         }
 
         #endregion
-
-        private bool _disposed;
 
         public void Dispose()
         {
@@ -247,7 +234,7 @@ namespace RxMqtt.Client
 
             _disposed = true;
 
-            foreach (var disposable in _disposables)
+            foreach (var disposable in _subscriptions)
             {
                 disposable.Value?.Dispose();
             }
