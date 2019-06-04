@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -17,7 +18,7 @@ namespace RxMqtt.Broker
     {
         private static readonly ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private static readonly Dictionary<Guid, ConnectedClient> _clients = new Dictionary<Guid, ConnectedClient>();
+        private static readonly ConcurrentDictionary<Guid, ConnectedClient> _clients = new ConcurrentDictionary<Guid, ConnectedClient>();
 
         internal static ISubject<Publish> PublishSyncSubject;
         private readonly AutoResetEvent _acceptConnectionResetEvent = new AutoResetEvent(false);
@@ -117,7 +118,7 @@ namespace RxMqtt.Broker
             var listener = (Socket) asyncResult.AsyncState;
             var socket = listener.EndAccept(asyncResult);
 
-            _clients.Add(Guid.NewGuid(), new ConnectedClient(socket));
+            _clients.TryAdd(Guid.NewGuid(), new ConnectedClient(socket));
 
             _logger.Log(LogLevel.Trace, "Client task created");
 
@@ -126,24 +127,19 @@ namespace RxMqtt.Broker
 
         private static void DisposeDisconnectedClients()
         {
-            var toRemove = new List<Guid>();
-
-            foreach (var client in _clients.Where(c => !c.Value.IsConnected()))
+            foreach (var ce in _clients.Where(c => !c.Value.IsConnected()))
+            {
                 try
                 {
-                    toRemove.Add(client.Key);
+                    _clients.TryRemove(ce.Key, out var client);
 
-                    client.Value.Dispose();
+                    client?.Dispose();
                 }
                 catch (Exception e)
                 {
                     _logger.Log(LogLevel.Error, $"Error disposing client => '{e.Message}'");
                 }
-
-            foreach (var guid in toRemove) _clients.Remove(guid);
-
-            if (toRemove.Count > 0)
-                _logger.Log(LogLevel.Debug, $"Disposed '{toRemove.Count}' clients");
+            }
         }
     }
 }
