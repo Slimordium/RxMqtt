@@ -95,9 +95,8 @@ namespace RxMqtt.Shared
 
                         tempBuffer = ReadBytes(3);
 
-                        if (tempBuffer == null || !tempBuffer.Any())
+                        if (!IsBufferValid(tempBuffer))
                         {
-                            _cancellationTokenSourceSource.Cancel();
                             break;
                         }
 
@@ -109,9 +108,8 @@ namespace RxMqtt.Shared
                     case MsgType.PingResponse:
                         tempBuffer = ReadBytes(1);
 
-                        if (tempBuffer == null || !tempBuffer.Any())
+                        if (!IsBufferValid(tempBuffer))
                         {
-                            _cancellationTokenSourceSource.Cancel();
                             break;
                         }
 
@@ -126,9 +124,8 @@ namespace RxMqtt.Shared
                     case MsgType.Unsubscribe:
                         tempBuffer = ReadBytes(4);
 
-                        if (tempBuffer == null || !tempBuffer.Any())
+                        if (!IsBufferValid(tempBuffer))
                         {
-                            _cancellationTokenSourceSource.Cancel();
                             break;
                         }
 
@@ -171,6 +168,16 @@ namespace RxMqtt.Shared
 
                 offset = rxBuffer.Length;
             }
+        }
+
+        private bool IsBufferValid(IReadOnlyList<byte> buffer)
+        {
+            if (buffer != null && buffer.Any())
+                return true;
+
+            _cancellationTokenSourceSource.Cancel();
+
+            return false;
         }
 
         internal void Write(MqttMessage message)
