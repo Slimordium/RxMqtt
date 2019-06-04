@@ -22,21 +22,19 @@ namespace RxMqtt.Broker
 
         private ILogger _logger = LogManager.GetCurrentClassLogger();
 
-        private readonly IDisposable _disposable;
+        private readonly IDisposable _packetSubscriptionDisposable;
 
         private ConcurrentDictionary<string, IDisposable> _subscriptionDisposables = new ConcurrentDictionary<string, IDisposable>();
 
         private MqttStream _mqttStream;
 
-        private readonly EventLoopScheduler _readEventLoopScheduler = new EventLoopScheduler();
-
-        internal bool Disposed { get; set; }
+        private bool _disposed;
 
         private int _keepAliveSeconds;
 
-        private Timer _heartbeatTimer;
+        private Timer _unresponsiveClientCheckTimer;
 
-        private Socket _socket;
+        private readonly Socket _socket;
 
         internal ConnectedClient(Socket socket)
         {
@@ -47,8 +45,7 @@ namespace RxMqtt.Broker
 
             _socket = socket;
             _mqttStream = new MqttStream(_socket);
-
-            _disposable = _mqttStream.PacketObservable.Subscribe(ParsePacket);
+            _packetSubscriptionDisposable = _mqttStream.PacketObservable.Subscribe(ParsePacket);
         }
 
         /// <summary>
@@ -68,9 +65,9 @@ namespace RxMqtt.Broker
 
         private void Dispose(bool disposing)
         {
-            if (!disposing || Disposed) return;
+            if (!disposing || _disposed) return;
 
-            Disposed = true;
+            _disposed = true;
 
             foreach (var subscription in _subscriptionDisposables)
             {
@@ -97,10 +94,10 @@ namespace RxMqtt.Broker
         
         private void ParsePacket(byte[] packet)
         {
-            if (packet == null || packet.Length <= 1)
+            if (packet == null || packet.Length <= 1 || _disposed)
                 return;
 
-            _heartbeatTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
+            _unresponsiveClientCheckTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
             var msgType = (MsgType)(byte)((packet[0] & 0xf0) >> (byte)MsgOffset.Type);
 
@@ -118,15 +115,22 @@ namespace RxMqtt.Broker
                     case MsgType.Connect:
                         var connectMsg = new Connect(packet);
 
+                        if (string.IsNullOrEmpty(connectMsg.ClientId) || connectMsg.ClientId.Length > 65535)
+                        {
+                            _logger.Log(LogLevel.Error, "Invalid ClientId");
+                            Dispose();
+                            return;
+                        }
+
                         _keepAliveSeconds = connectMsg.KeepAlivePeriod;
 
                         _logger.Log(LogLevel.Trace, $"Client '{connectMsg.ClientId}' connected");
 
                         _clientId = connectMsg.ClientId;
 
-                        _heartbeatTimer = new Timer(HeartbeatCallback, null, TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
+                        _unresponsiveClientCheckTimer = new Timer(HeartbeatCallback, null, TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
 
-                        _heartbeatTimer.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
+                        _unresponsiveClientCheckTimer.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
                         _logger = LogManager.GetLogger(_clientId);
 
@@ -162,7 +166,7 @@ namespace RxMqtt.Broker
             }
             catch (Exception e)
             {
-                _logger.Log(LogLevel.Error, $"ProcessRead error '{e.Message}'");
+                _logger.Log(LogLevel.Error, $"ParsePacket error '{e.Message}'");
             }
         }
 

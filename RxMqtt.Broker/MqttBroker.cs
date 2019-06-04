@@ -8,7 +8,6 @@ using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using NLog;
-using RxMqtt.Shared;
 using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
 
