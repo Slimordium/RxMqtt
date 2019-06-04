@@ -24,8 +24,6 @@ namespace RxMqtt.Shared.Messages
 
         public byte[] Message { get; set; } = new byte[1];
 
-        public string MessageString => Encoding.UTF8.GetString(Message);
-
         public string Topic { get; set; } = string.Empty;
 
         internal bool Retain { get; set; }
