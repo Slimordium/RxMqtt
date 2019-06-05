@@ -40,6 +40,12 @@ namespace RxMqtt.Broker
 
         private bool _started;
 
+        private long _publishCount;
+
+        private IDisposable _publishCountDisposable;
+
+        private DateTime _startTime;
+
         public MqttBroker()
         {
             _logger.Log(LogLevel.Info, "Binding to all local addresses, port 1883");
@@ -78,6 +84,10 @@ namespace RxMqtt.Broker
                 return;
             }
 
+            _startTime = DateTime.Now;
+
+            _started = true;
+
             _disposeDisconnectedClientsIntervalDisposable = Observable
                 .Interval(TimeSpan.FromSeconds(3))
                 .ObserveOn(Scheduler.Default)
@@ -90,7 +100,9 @@ namespace RxMqtt.Broker
 
             PublishSyncSubject = Subject.Synchronize(_publishSubject);
 
-            _started = true;
+            _publishCountDisposable = PublishSyncSubject
+                .ObserveOn(Scheduler.Default)
+                .Subscribe(_ => Interlocked.Increment(ref _publishCount));
 
             _cancellationToken = cancellationToken;
 
@@ -133,11 +145,11 @@ namespace RxMqtt.Broker
 
         private void PublishStats()
         {
-            var msg = Encoding.UTF8.GetBytes($"ConnectedClients:{_clients.Count};");
+            var pubCount = Interlocked.Read(ref _publishCount);
 
-            var statsMsg = new Publish();
-            statsMsg.Topic = "$stats";
-            statsMsg.Message = msg;
+            var msg = Encoding.UTF8.GetBytes($"RunTime:{DateTime.Now - _startTime};ConnectedClients:{_clients.Count};PublishCount:{pubCount}");
+
+            var statsMsg = new Publish {Topic = "$stats", Message = msg};
 
             PublishSyncSubject.OnNext(statsMsg);
         }
