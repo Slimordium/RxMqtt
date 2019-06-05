@@ -92,32 +92,32 @@ namespace RxMqtt.Client
                     case MsgType.Publish:
                         var msg = new Publish(packet);
 
-                        PacketSubject.OnNext(new PacketEnvelope { MsgType = MsgType.Publish, PacketId = msg.PacketId, Message = msg });
+                        PublishedMessagesSubject.OnNext(msg);
                         _readWriteStream.Write(new PublishAck(msg.PacketId));
 
                         packetId = msg.PacketId;
                         
                         break;
                     case MsgType.ConnectAck:
-                        PacketAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
+                        MessageAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.ConnectAck });
                         break;
                     case MsgType.PublishAck:
                         var pubAck = new PublishAck(packet.ToArray());
                         packetId = pubAck.PacketId;
-                        PacketAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
+                        MessageAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PublishAck, PacketId = pubAck.PacketId, Message = pubAck });
                         break;
                     case MsgType.SubscribeAck:
                         var subAck = new SubscribeAck(packet.ToArray());
                         packetId = subAck.PacketId;
-                        PacketAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.SubscribeAck, PacketId = subAck.PacketId, Message = subAck });
+                        MessageAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.SubscribeAck, PacketId = subAck.PacketId, Message = subAck });
                         break;
                     case MsgType.UnsubscribeAck:
                         var unsubAck = new UnsubscribeAck(packet.ToArray());
                         packetId = unsubAck.PacketId;
-                        PacketAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.UnsubscribeAck, PacketId = unsubAck.PacketId, Message = unsubAck });
+                        MessageAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.UnsubscribeAck, PacketId = unsubAck.PacketId, Message = unsubAck });
                         break;
                     case MsgType.PingResponse:
-                        PacketAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PingResponse });
+                        MessageAckSubject.OnNext(new PacketEnvelope { MsgType = MsgType.PingResponse });
                         break;
                     default:
                         _logger.Log(LogLevel.Warn, $"Unhandled message type In <= {msgType}");
@@ -141,8 +141,8 @@ namespace RxMqtt.Client
         private MqttStream _readWriteStream;
         private readonly string _hostName;
         private IDisposable _readDisposable;
-        internal ISubject<PacketEnvelope> PacketSubject = new BehaviorSubject<PacketEnvelope>(new PacketEnvelope());
-        internal ISubject<PacketEnvelope> PacketAckSubject = new BehaviorSubject<PacketEnvelope>(new PacketEnvelope());
+        internal ISubject<Publish> PublishedMessagesSubject { get; } = new BehaviorSubject<Publish>(new Publish());
+        internal ISubject<PacketEnvelope> MessageAckSubject { get; } = new BehaviorSubject<PacketEnvelope>(new PacketEnvelope());
         #endregion
 
         private void Dispose(bool disposing)

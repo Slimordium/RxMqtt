@@ -83,7 +83,7 @@ namespace RxMqtt.Client
             {
                 _connection.Write(new PingMsg());
 
-                await _connection.PacketAckSubject
+                await _connection.MessageAckSubject
                             .Timeout(_timeOut)
                             .Where(envelope => envelope.MsgType == MsgType.PingResponse)
                             .ObserveOn(Scheduler.Default)
@@ -134,10 +134,10 @@ namespace RxMqtt.Client
                 throw new ArgumentException($"'{topic}' is not a valid topic");
             }
 
-            var publishObservable = _connection.PacketSubject
-                .Where(message => message.MsgType == MsgType.Publish && ((Publish)message.Message).IsTopicMatch(topic))
+            var publishObservable = _connection.PublishedMessagesSubject
+                .Where(publishedMessage => publishedMessage.IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default)
-                .Select(publishedMessage => (Publish)publishedMessage.Message);
+                .Select(publishedMessage => publishedMessage);
 
             _subscriptions.TryAdd(topic, null);
 
@@ -170,14 +170,14 @@ namespace RxMqtt.Client
             }
 
             _subscriptions.TryAdd(topic,
-                _connection.PacketSubject
-                .Where(envelope => envelope.MsgType == MsgType.Publish && ((Publish)envelope.Message).IsTopicMatch(topic))
+                _connection.PublishedMessagesSubject
+                .Where(publishedMessages => publishedMessages.IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default)
-                .Subscribe(envelope =>
+                .Subscribe(publishedMessage =>
                     {
                         try
                         {
-                            callback.Invoke((Publish)envelope.Message);
+                            callback.Invoke(publishedMessage);
                         }
                         catch (Exception e)
                         {
@@ -196,7 +196,7 @@ namespace RxMqtt.Client
         {
             try
             {
-                await _connection.PacketAckSubject
+                await _connection.MessageAckSubject
                                 .Timeout(_timeOut)
                                 .Where(packetEnvelope => packetEnvelope.MsgType == msgType && packetEnvelope.PacketId == packetId)
                                 .ObserveOn(Scheduler.Default)
