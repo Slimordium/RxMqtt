@@ -48,6 +48,7 @@ namespace RxMqtt.Client
         private readonly ConcurrentDictionary<string, IDisposable> _subscriptions = new ConcurrentDictionary<string, IDisposable>();
         private bool _disposed;
         private Timer _keepAliveTimer;
+        private TimeSpan _timeOut = TimeSpan.FromSeconds(3);
 
         #endregion
 
@@ -78,11 +79,22 @@ namespace RxMqtt.Client
 
         private async void Ping(object sender)
         {
-            _connection.Write(new PingMsg());
+            try
+            {
+                _connection.Write(new PingMsg());
 
-            var pingResponse = await _connection.PacketSubject.Where(envelope => envelope.MsgType == MsgType.PingResponse).Take(1);
+                await _connection.PacketAckSubject
+                            .Timeout(_timeOut)
+                            .Where(envelope => envelope.MsgType == MsgType.PingResponse)
+                            .ObserveOn(Scheduler.Default)
+                            .Take(1);
 
-            _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
+                _keepAliveTimer.Change((int)TimeSpan.FromSeconds(_keepAliveInSeconds).TotalMilliseconds, Timeout.Infinite);
+            }
+            catch (Exception e)
+            {
+                _logger.Log(LogLevel.Error, $"Waiting for PingResponse => {e.Message}");
+            }
         }
 
         public Task<bool> PublishAsync(string message, string topic)
@@ -90,7 +102,7 @@ namespace RxMqtt.Client
             return PublishAsync(Encoding.UTF8.GetBytes(message), topic);
         }
 
-        public async Task<bool> PublishAsync(byte[] buffer, string topic)
+        public Task<bool> PublishAsync(byte[] buffer, string topic)
         {
             if (topic.Contains("#") || topic.Contains("+"))
             {
@@ -107,7 +119,7 @@ namespace RxMqtt.Client
 
             _connection.Write(messageToPublish);
 
-            return await WaitForAck(MsgType.PublishAck, messageToPublish.PacketId);
+            return WaitForAck(MsgType.PublishAck, messageToPublish.PacketId);
         }
 
         /// <summary>
@@ -184,17 +196,15 @@ namespace RxMqtt.Client
         {
             try
             {
-                var subscribeAck = await _connection.PacketSubject
-                    .Timeout(TimeSpan.FromSeconds(3))
-                    .Where(packetEnvelope =>
-                        packetEnvelope.MsgType == msgType &&
-                        packetEnvelope.PacketId == packetId)
-                    .ObserveOn(Scheduler.Default)
-                    .Take(1);
+                await _connection.PacketAckSubject
+                                .Timeout(_timeOut)
+                                .Where(packetEnvelope => packetEnvelope.MsgType == msgType && packetEnvelope.PacketId == packetId)
+                                .ObserveOn(Scheduler.Default)
+                                .Take(1);
             }
             catch (TimeoutException)
             {
-                _logger.Log(LogLevel.Warn, $"Timed out waiting for {msgType}");
+                _logger.Log(LogLevel.Warn, $"Timed out waiting for '{msgType}'");
 
                 return await Task.FromResult(false);
             }

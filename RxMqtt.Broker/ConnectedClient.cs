@@ -32,7 +32,7 @@ namespace RxMqtt.Broker
 
         private int _keepAliveSeconds;
 
-        private Timer _unresponsiveClientCheckTimer;
+        private Timer _keepAliveCheckTimer;
 
         private readonly Socket _socket;
 
@@ -97,7 +97,7 @@ namespace RxMqtt.Broker
             if (packet == null || packet.Length <= 1 || _disposed)
                 return;
 
-            _unresponsiveClientCheckTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
+            _keepAliveCheckTimer?.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
 
             var msgType = (MsgType)(byte)((packet[0] & 0xf0) >> (byte)MsgOffset.Type);
 
@@ -113,7 +113,13 @@ namespace RxMqtt.Broker
                         MqttBroker.PublishSyncSubject.OnNext(publishMsg); //Broadcast this message to any client that is subscribed to the topic this was sent to
                         break;
                     case MsgType.Connect:
-                        var connectMsg = new Connect(packet);
+                        var connectMsg = new Connect(packet); 
+
+                        //TODO: Validate version of client attempting to connect, set reject reason appropriately 
+                        //TODO: Support username/password
+                        //TODO: Support TLS
+                        //TODO: Support Disconnect messages
+                        //TODO: modify logging messages to use appropriate log level
 
                         if (string.IsNullOrEmpty(connectMsg.ClientId) || connectMsg.ClientId.Length > 65535)
                         {
@@ -128,9 +134,9 @@ namespace RxMqtt.Broker
 
                         _clientId = connectMsg.ClientId;
 
-                        _unresponsiveClientCheckTimer = new Timer(HeartbeatCallback, null, TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
-
-                        _unresponsiveClientCheckTimer.Change(TimeSpan.FromSeconds(_keepAliveSeconds), Timeout.InfiniteTimeSpan);
+                        _keepAliveCheckTimer = new Timer(HeartbeatCallback, null, TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
+                        //All recieved packets reset this timer. So in an ideal world, this would never execute
+                        _keepAliveCheckTimer.Change(TimeSpan.FromSeconds(_keepAliveSeconds + _keepAliveSeconds / 2), Timeout.InfiniteTimeSpan);
 
                         _logger = LogManager.GetLogger(_clientId);
 

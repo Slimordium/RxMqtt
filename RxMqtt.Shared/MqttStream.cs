@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
@@ -24,7 +25,7 @@ namespace RxMqtt.Shared
         {
             _logger = LogManager.GetLogger($"ReadWriteStream-{DateTime.Now.Minute}.{DateTime.Now.Millisecond}");
 
-            PacketObservable = PacketEnumerable().ToObservable(System.Reactive.Concurrency.Scheduler.Default);
+            PacketObservable = PacketEnumerable().ToObservable(Scheduler.Default);
         }
 
         internal IObservable<byte[]> PacketObservable { get; private set; }

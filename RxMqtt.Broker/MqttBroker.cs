@@ -20,18 +20,18 @@ namespace RxMqtt.Broker
 
         private static readonly ConcurrentDictionary<Guid, ConnectedClient> _clients = new ConcurrentDictionary<Guid, ConnectedClient>();
 
-        internal static ISubject<Publish> PublishSyncSubject;
+        internal static ISubject<Publish> PublishSyncSubject { get; private set; }
         private readonly AutoResetEvent _acceptConnectionResetEvent = new AutoResetEvent(false);
 
         private readonly IPAddress _ipAddress = IPAddress.Any;
 
         private readonly int _port = 1883;
 
-        private readonly ISubject<Publish> _publishSubject = new Subject<Publish>(); //Everyone pushes to this
+        private readonly ISubject<Publish> _publishSubject = new Subject<Publish>();
 
         private CancellationToken _cancellationToken;
 
-        private IDisposable _disposable;
+        private IDisposable _disposeDisconnectedClientsIntervalDisposable;
 
         private IPEndPoint _ipEndPoint;
 
@@ -77,7 +77,7 @@ namespace RxMqtt.Broker
                 return;
             }
 
-            _disposable = Observable
+            _disposeDisconnectedClientsIntervalDisposable = Observable
                 .Interval(TimeSpan.FromSeconds(3))
                 .ObserveOn(Scheduler.Default) //Was subscribe on NewThreadScheduler
                 .Subscribe(_ => DisposeDisconnectedClients());
