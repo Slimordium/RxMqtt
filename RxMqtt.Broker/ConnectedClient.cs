@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using NLog;
@@ -134,6 +135,8 @@ namespace RxMqtt.Broker
 
                         _clientId = connectMsg.ClientId;
 
+                        AnnouncePresence(true);
+
                         _keepAliveCheckTimer = new Timer(HeartbeatCallback, null, TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
                         //All recieved packets reset this timer. So in an ideal world, this would never execute
                         _keepAliveCheckTimer.Change(TimeSpan.FromSeconds(_keepAliveSeconds + _keepAliveSeconds / 2), Timeout.InfiniteTimeSpan);
@@ -145,7 +148,6 @@ namespace RxMqtt.Broker
                         _mqttStream.Write(new ConnectAck());
                         break;
                     case MsgType.PingRequest:
-
                         _mqttStream.Write(new PingResponse());
                         break;
                     case MsgType.Subscribe:
@@ -163,7 +165,9 @@ namespace RxMqtt.Broker
                         Unsubscribe(unsubscribeMsg.Topics);
                         break;
                     case MsgType.PublishAck:
+                        break;
                     case MsgType.Disconnect:
+                        AnnouncePresence(false);
                         break;
                     default:
                         _logger.Log(LogLevel.Warn, $"Ignoring message");
@@ -176,6 +180,40 @@ namespace RxMqtt.Broker
             }
         }
 
+        private void AnnouncePresence(bool connected)
+        {
+            var pubMsg = new Publish();
+            pubMsg.Message = Encoding.UTF8.GetBytes($"ClientId:{_clientId}");
+
+            if (connected)
+            {
+                pubMsg.Topic = $"$presence/{_clientId}/connected";
+            }
+            else
+            {
+                pubMsg.Topic = $"$presence/{_clientId}/disconnected";
+            }
+
+            MqttBroker.PublishSyncSubject.OnNext(pubMsg);
+        }
+
+        private void AnnounceSubscription(bool subscribed, string topic)
+        {
+            var pubMsg = new Publish();
+            pubMsg.Message = Encoding.UTF8.GetBytes($"Topic:{topic}");
+
+            if (subscribed)
+            {
+                pubMsg.Topic = $"$subscription/{_clientId}/subscribed";
+            }
+            else
+            {
+                pubMsg.Topic = $"$subscription/{_clientId}/unsubscribed";
+            }
+
+            MqttBroker.PublishSyncSubject.OnNext(pubMsg);
+        }
+
         private void Subscribe(IEnumerable<string> topics)
         {
             if (topics == null)
@@ -185,6 +223,8 @@ namespace RxMqtt.Broker
             {
                 if (_subscriptionDisposables.ContainsKey(topic))
                     continue;
+
+                AnnounceSubscription(true, topic);
 
                 _subscriptionDisposables.TryAdd(topic, MqttBroker.Subscribe(topic).ObserveOn(Scheduler.Default).Subscribe(OnNext));
             }
@@ -199,6 +239,8 @@ namespace RxMqtt.Broker
             {
                 _subscriptionDisposables.TryRemove(topic, out var disposable);
                 disposable?.Dispose();
+
+                AnnounceSubscription(false, topic);
             }
         }
     }

@@ -119,6 +119,7 @@ namespace RxMqtt.Client
 
             _connection.Write(messageToPublish);
 
+            //TODO: If waiting for the ack times out, check connection state and re-publish 
             return WaitForAck(MsgType.PublishAck, messageToPublish.PacketId);
         }
 

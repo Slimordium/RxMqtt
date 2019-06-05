@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Text;
 using System.Threading;
 using NLog;
 using RxMqtt.Shared.Enums;
@@ -32,6 +33,8 @@ namespace RxMqtt.Broker
         private CancellationToken _cancellationToken;
 
         private IDisposable _disposeDisconnectedClientsIntervalDisposable;
+
+        private IDisposable _statsPublishDisposable;
 
         private IPEndPoint _ipEndPoint;
 
@@ -63,9 +66,7 @@ namespace RxMqtt.Broker
         internal static IObservable<Publish> Subscribe(string topic)
         {
             return PublishSyncSubject
-                .Where(message => message != null
-                                  && message.MsgType == MsgType.Publish
-                                  && message.IsTopicMatch(topic))
+                .Where(message => message != null && message.IsTopicMatch(topic))
                 .ObserveOn(Scheduler.Default);
         }
 
@@ -79,8 +80,13 @@ namespace RxMqtt.Broker
 
             _disposeDisconnectedClientsIntervalDisposable = Observable
                 .Interval(TimeSpan.FromSeconds(3))
-                .ObserveOn(Scheduler.Default) //Was subscribe on NewThreadScheduler
+                .ObserveOn(Scheduler.Default)
                 .Subscribe(_ => DisposeDisconnectedClients());
+
+            _statsPublishDisposable = Observable
+                .Interval(TimeSpan.FromSeconds(5))
+                .ObserveOn(Scheduler.Default)
+                .Subscribe(_ => PublishStats());
 
             PublishSyncSubject = Subject.Synchronize(_publishSubject);
 
@@ -123,6 +129,17 @@ namespace RxMqtt.Broker
             _logger.Log(LogLevel.Trace, "Client task created");
 
             _acceptConnectionResetEvent.Set();
+        }
+
+        private void PublishStats()
+        {
+            var msg = Encoding.UTF8.GetBytes($"ConnectedClients:{_clients.Count};");
+
+            var statsMsg = new Publish();
+            statsMsg.Topic = "$stats";
+            statsMsg.Message = msg;
+
+            PublishSyncSubject.OnNext(statsMsg);
         }
 
         private static void DisposeDisconnectedClients()
