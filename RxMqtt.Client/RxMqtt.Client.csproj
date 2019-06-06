@@ -3,10 +3,11 @@
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;net46;netcoreapp2.0</TargetFrameworks>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.4.2.1</Version>
-    <Description>QOS 1 MQTT 3.1.1 client</Description>
+    <Version>1.4.2.2</Version>
+    <Description>QOS 1 MQTT Client (3.1.1)</Description>
     <LangVersion>7.1</LangVersion>
-    <AssemblyVersion>1.4.2.1</AssemblyVersion>
+    <AssemblyVersion>1.4.2.2</AssemblyVersion>
+    <PackageProjectUrl>https://github.com/Slimordium/RxMqtt</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>
