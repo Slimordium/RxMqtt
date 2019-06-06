@@ -133,7 +133,7 @@ namespace RxMqtt.Broker
 
         private void PublishStats()
         {
-            var msg = Encoding.UTF8.GetBytes($"ConnectedClients:{_clients.Count};");
+            var msg = Encoding.UTF8.GetBytes($"ConnectedClients:{_clients.Count}");
 
             var statsMsg = new Publish();
             statsMsg.Topic = "$stats";
