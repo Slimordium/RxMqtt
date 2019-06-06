@@ -209,7 +209,7 @@ namespace RxMqtt.Client.Console
                     {
                         sw.Stop();
 
-                        System.Console.WriteLine($"Publish canceled after publishing {i} in {sw.Elapsed}");
+                        System.Console.WriteLine($"Publish canceled after publishing {i} in {sw.Elapsed}  @ {i / sw.Elapsed.TotalSeconds} per second");
                         _mre.Reset();
                         return;
                     }
@@ -228,7 +228,7 @@ namespace RxMqtt.Client.Console
 
             sw.Stop();
 
-            System.Console.WriteLine($"Publish completed {count} in {sw.Elapsed}");
+            System.Console.WriteLine($"Publish completed {count} in {sw.Elapsed} @ {parsedCount / sw.Elapsed.TotalSeconds} per second");
         }
     }
 }

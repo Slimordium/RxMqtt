@@ -42,6 +42,8 @@ namespace RxMqtt.Broker
 
         private long _publishCount;
 
+        private long _lastCount;
+
         private IDisposable _publishCountDisposable;
 
         private DateTime _startTime;
@@ -147,7 +149,11 @@ namespace RxMqtt.Broker
         {
             var pubCount = Interlocked.Read(ref _publishCount);
 
-            var msg = Encoding.UTF8.GetBytes($"RunTime:{DateTime.Now - _startTime};ConnectedClients:{_clients.Count};PublishCount:{pubCount}");
+            var mps = (pubCount - _lastCount) / 5;//How many msgs per second?
+
+            _lastCount = pubCount;
+
+            var msg = Encoding.UTF8.GetBytes($"RunTime:{DateTime.Now - _startTime};PublishCount:{pubCount};MPS:{mps};ConnectedClients:{_clients.Count}");
 
             var statsMsg = new Publish {Topic = "$stats", Message = msg};
 
