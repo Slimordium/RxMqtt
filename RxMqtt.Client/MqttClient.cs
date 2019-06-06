@@ -124,7 +124,7 @@ namespace RxMqtt.Client
         }
 
         /// <summary>
-        /// Returns observable that emmits messages published on specified topic
+        /// Returns observable that emits messages published on specified topic
         /// </summary>
         /// <param name="topic"></param>
         /// <returns></returns>
