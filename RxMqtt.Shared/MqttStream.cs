@@ -7,6 +7,7 @@ using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using NLog;
 using RxMqtt.Shared.Enums;
 using RxMqtt.Shared.Messages;
@@ -181,35 +182,47 @@ namespace RxMqtt.Shared
             return false;
         }
 
-        internal void Write(MqttMessage message)
-        {
-            if (message == null)
-                return;
+        //internal void Write(MqttMessage message)
+        //{
+        //    if (message == null)
+        //        return;
 
+        //    var buffer = message.GetBytes();
+
+        //    _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}', '{buffer.Length}' bytes");
+
+        //    WriteBytes(buffer);
+        //}
+
+        internal Task WriteAsync(MqttMessage message)
+        {
             var buffer = message.GetBytes();
 
-            _logger.Log(LogLevel.Info, $"Out => '{message.MsgType}', '{buffer.Length}' bytes");
-
-            WriteBytes(buffer);
+            return WriteAsync(buffer, 0, buffer.Length, _cancellationTokenSourceSource.Token);
         }
 
-        private void WriteBytes(byte[] buffer)
-        {
-            if (_binaryWriter == null)
-                _binaryWriter = new BinaryWriter(this, Encoding.UTF8, true);
+        //private void WriteBytes(byte[] buffer)
+        //{
+        //    if (_binaryWriter == null)
+        //        _binaryWriter = new BinaryWriter(this, Encoding.UTF8, true);
 
-            try
-            {
-                _binaryWriter.Write(buffer);
-            }
-            catch (Exception e)
-            {
-                _logger.Log(LogLevel.Error, e.Message);
+        //    try
+        //    {
+        //        _binaryWriter.Write(buffer);
+        //    }
+        //    catch (Exception e)
+        //    {
+        //        _logger.Log(LogLevel.Error, e.Message);
 
-                if (!_cancellationTokenSourceSource.IsCancellationRequested)
-                    _cancellationTokenSourceSource.Cancel();
-            }
-        }
+        //        if (!_cancellationTokenSourceSource.IsCancellationRequested)
+        //            _cancellationTokenSourceSource.Cancel();
+        //    }
+        //}
+
+        //private void WriteCallback(IAsyncResult ar)
+        //{
+        //    throw new NotImplementedException();
+        //}
 
         private byte[] ReadBytes(int bytesToRead)
         {
