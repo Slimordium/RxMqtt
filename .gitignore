@@ -222,8 +222,4 @@ ModelManifest.xml
 /obj/debug
 /packages.zip
 *.DotSettings
-/Client/MqttTest
-/RxMqttUi
-/RxMqtt.Ui
-/RxMqtt.Ui.sln
-/Report20180401-1330.diagsession
+

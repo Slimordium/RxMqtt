@@ -1,13 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net46;netcoreapp2.0</TargetFrameworks>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <TargetFrameworks>netstandard2.0;netcoreapp2.0;net46</TargetFrameworks>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <Version>1.4.2.2</Version>
     <Description>QOS 1 MQTT Client (3.1.1)</Description>
     <LangVersion>7.1</LangVersion>
-    <AssemblyVersion>1.4.2.2</AssemblyVersion>
+    <AssemblyVersion>1.4.2.3</AssemblyVersion>
     <PackageProjectUrl>https://github.com/Slimordium/RxMqtt</PackageProjectUrl>
+    <PackageTags>MQTT,RX,MQTT Client</PackageTags>
+    <FileVersion>1.4.2.3</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

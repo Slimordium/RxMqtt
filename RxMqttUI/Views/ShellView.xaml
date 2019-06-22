@@ -5,26 +5,56 @@
     xmlns:local="using:RxMqttUI.Views"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:micro="using:Caliburn.Micro"
+    xmlns:viewModels="using:RxMqttUI.ViewModels"
     mc:Ignorable="d"
-    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    Background="White"
+    Width="805"
+    HorizontalContentAlignment="Left">
 
-    <Grid>
-        <Pivot x:Name="rootPivot" Title="RxMqtt" ItemsSource="{Binding PivotViewItems}" Width="700" HorizontalAlignment="Left">
-            <Pivot.RightHeader>
-                <CommandBar ClosedDisplayMode="Minimal">
-                    <AppBarButton x:Name="Back" Icon="Back" Label="Previous"/>
-                    <AppBarButton x:Name="Forward" Icon="Forward" Label="Next" />
-                </CommandBar>
-            </Pivot.RightHeader>
-            <!--<PivotItem Header="Broker">
-                --><!--Pivot content goes here--><!--
-                <TextBlock Text="Content of pivot item 1."/>
-            </PivotItem>
-            <PivotItem Header="Client">
-                --><!--Pivot content goes here--><!--
-                <TextBlock Text="Content of pivot item 2."/>
-            </PivotItem>-->
-        </Pivot>
 
+    <Grid Height="Auto">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="160"/>
+            <ColumnDefinition Width="160"/>
+            <ColumnDefinition Width="*"/>
+
+
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="20"/>
+            <RowDefinition Height="40"/>
+            <!--<RowDefinition Height="80"/>-->
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Column="0" Grid.Row="0" Width="120" Height="40" VerticalAlignment="Bottom" Text="Client ID" Foreground="Black" FontSize="9"/>
+        <TextBlock Grid.Column="1" Grid.Row="0" Width="120" Height="40" VerticalAlignment="Bottom" Text="Broker hostname or IP" Foreground="Black" FontSize="9"/>
+
+        <TextBox Grid.Column="0" Grid.Row="1" x:Name="ClientId" Width="120" Height="30" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+        <Button Grid.Column="1" Grid.Row="1" x:Name="AddClient" Content="Add Client" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+
+        <ListBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Height="400" 
+                  ItemsSource="{Binding Clients}"
+                  
+                  Width="Auto" HorizontalAlignment="Left" HorizontalContentAlignment="Left" VerticalAlignment="Center">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal" Height="150">
+                        <TextBlock Text="{Binding ClientId}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Log}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!--<Button Grid.Column="2" Grid.Row="2" x:Name="GetClient" Content="Get Client" VerticalAlignment="Top" HorizontalAlignment="Left"/>-->
+
+        <!--<ContentControl Grid.Column="0" Grid.Row="3" x:Name="ActiveItem" HorizontalAlignment="Left" VerticalAlignment="Top" Width="400" Height="400"/>-->
+
+
+        
     </Grid>
+
+ 
 </Page>
